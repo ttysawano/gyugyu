@@ -15,7 +15,7 @@ check($a['id'] !== $b['id'] && count($s->listing()) === 2, 'independent instance
 check($a['title'] === '実験調整' && $a['description'] === "一行\n<script>alert(1)</script>\n三行", 'normalization');
 check(!isset($s->listing()[0]['description']), 'no portal description');
 check(count($a['days']) === 2 && count($a['days'][0]['slots']) === 48, '48 slots per day');
-check(array_sum(array_column($a['days'][0]['slots'],'is_candidate')) === 18, '09-18 mask');
+foreach ($a['days'] as $day) check(array_column($day['slots'],'is_candidate') === array_map(fn($i)=>($i>=6 && $i<24)?1:0,range(0,47)), '09-18 exact mask on every listed date');
 check($a['days'][0]['slots'][0]['starts_at_utc'] === '2026-11-01T21:00:00Z', 'JST UTC conversion');
 check($a['days'][0]['slots'][47]['ends_at_utc'] === '2026-11-02T21:00:00Z', 'next day boundary');
 foreach ([['title'=>' '],['title'=>str_repeat('あ',141)],['description'=>str_repeat('あ',2001)],['dates'=>['2026-02-30']],['dates'=>["2026-11-02\0bad"]],['dates'=>['1899-12-31']],['dates'=>['9999-01-01']],['dates'=>['2026-1-02']],['dates'=>array_fill(0,367,'2026-11-02')],['dates'=>[]],['dates'=>[[]]],['initial_window'=>['start'=>'09:15','end'=>'18:00']],['initial_window'=>['start'=>'18:00','end'=>'09:00']],['timezone'=>'UTC']] as $bad) rejects(fn()=>$s->create(array_replace($data,$bad)),422);
