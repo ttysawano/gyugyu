@@ -1,7 +1,7 @@
 <?php
 declare(strict_types=1);
 function candidateGrid(array $row): void {
-    echo '<section id="candidate-grid" data-instance="'.h($row['id']).'" data-status="'.h($row['status']).'" data-version="'.h($row['version']).'" data-revision="'.h($row['schema_revision']).'" data-api="'.h(url('api/index.php?route=/instances/'.$row['id'])).'" data-csrf="'.h($_SESSION['csrf']).'" data-density="16"><h2>日別の候補時間帯</h2><p>● 候補 · — 候補外。全員が参加者の回答を編集できます。出力・日付変更・受付状態変更は後続です。</p><noscript>候補帯の編集にはJavaScriptを有効にしてください。</noscript>';
+    echo '<section id="candidate-grid" data-instance="'.h($row['id']).'" data-status="'.h($row['status']).'" data-version="'.h($row['version']).'" data-revision="'.h($row['schema_revision']).'" data-api="'.h(url('api/index.php?route=/instances/'.$row['id'])).'" data-csrf="'.h($_SESSION['csrf']).'" data-density="16"><h2>日別の候補時間帯</h2><p>● 候補 · — 候補外。全員が参加者の回答を編集できます。日付変更・受付状態変更は後続です。</p><noscript>候補帯の編集にはJavaScriptを有効にしてください。</noscript>';
     echo '<label>30分セルの幅<select id="grid-density"><option value="16">16px</option><option value="20">20px</option><option value="24">24px</option></select></label>';
     if ($row['status'] === 'open') echo '<button type="button" id="candidate-edit" hidden>候補帯を編集</button>';
     echo '<p id="candidate-status" role="status" aria-live="polite">閲覧中</p><p id="candidate-inspect" role="status" aria-live="polite">セルにフォーカス、またはタップすると時刻と候補状態を確認できます。</p><div id="candidate-tools" hidden><fieldset id="candidate-inputs"><legend>候補帯を編集中</legend><p>パレットを選び、セルをドラッグ、またはキーボードで選択してください。タッチでの横移動は表の時間見出しをスワイプしてください。</p><label>パレット<select id="candidate-palette"><option value="true">候補にする</option><option value="false">候補外にする</option></select></label><button type="button" id="candidate-undo">Undo</button> <button type="button" id="candidate-redo">Redo</button><fieldset><legend>一括操作</legend><label>対象日<select id="candidate-scope"><option value="all">全日</option><option value="selected">選択した日</option></select></label><div id="candidate-days">';
@@ -15,6 +15,7 @@ function candidateGrid(array $row): void {
     foreach ($row['groups'] as $group) echo '<label><input type="checkbox" value="'.h($group['id']).'"> '.h($group['name']).'</label>';
     echo '</fieldset></template>';
     echo '<label>表示モード<select id="summary-mode"><option value="target">対象者のみ表示</option><option value="all">全員表示</option><option value="summary">集計のみ</option></select></label><p id="summary-source"></p><div id="summary-detail" aria-live="polite"></div><details><summary>候補順位（30分単位・同点は日時順）</summary><p id="summary-empty">順位対象なし</p><ol id="summary-ranking"></ol></details>';
+    echo '<fieldset id="export-controls"><legend>エクスポート</legend><p>サーバー上の最新の保存済みデータを出力します。他端末の更新も含み、画面読込み時点と異なる場合があります。編集中は出力できません。完全JSONは履歴を含む全データ、CSVは有効参加者・有効候補のみです。</p><label>形式<select id="export-format"><option value="json">完全JSON（全データ）</option><option value="wide">CSVワイド</option><option value="long">CSVロング</option><option value="summary">集計CSV</option></select></label><label>CSV対象<select id="export-scope"><option value="all">有効参加者全員</option><option value="mask">現在のマスク対象</option></select></label><button id="export-download" type="button" hidden>ダウンロード</button><p id="export-status" role="status"></p></fieldset>';
     $summary=Gyugyu\Summary::calculate($row);$totals=array_column($summary['slots'],null,'id');
     $names=array_count_values(array_column($row['participants'],'display_name'));
     foreach ($row['days'] as $day) {
@@ -53,5 +54,5 @@ function candidateGrid(array $row): void {
         }
         echo '</tbody></table></div></div>';
     }
-    echo '</section><script type="module" src="'.url('assets/candidates.mjs').'"></script><script type="module" src="'.url('assets/answers.mjs').'"></script><script type="module" src="'.url('assets/groups.mjs').'"></script>';
+    echo '</section><script type="module" src="'.url('assets/candidates.mjs').'"></script><script type="module" src="'.url('assets/answers.mjs').'"></script><script type="module" src="'.url('assets/groups.mjs').'"></script><script type="module" src="'.url('assets/exports.mjs').'"></script>';
 }

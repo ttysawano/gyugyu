@@ -58,4 +58,5 @@ check($db->query("SELECT COUNT(*) FROM audit_log WHERE action='edit'")->fetchCol
 require __DIR__.'/candidates.php';
 require __DIR__.'/participants.php';
 require __DIR__.'/groups.php';
+require __DIR__.'/exports.php';
 echo "PASS: $count assertions\n";

@@ -8,7 +8,7 @@ function initialize(root) {
     let display='target';const view=root.querySelector('#summary-mode'),summarize=summaryView(root);
     try {const saved=JSON.parse(sessionStorage.getItem(key));if(saved&&['all','include','exclude'].includes(saved.mode)&&Array.isArray(saved.selected))state={mode:saved.mode,selected:saved.selected.filter(id=>ids.includes(id))};} catch {}
     if(!ids.length)state={mode:'all',selected:[]};
-    const busy=()=>!!root.dataset.answerEditing||!!root.dataset.candidateEditing||!!metadata?.open;
+    const busy=()=>!!root.dataset.exporting||!!root.dataset.answerEditing||!!root.dataset.candidateEditing||!!metadata?.open;
     function render() {
         mode.value=state.mode;inputs.forEach(input=>input.checked=state.selected.includes(input.value));filter.disabled=busy();
         view.value=display;view.disabled=busy();
@@ -31,7 +31,7 @@ function initialize(root) {
         render();
     });
     root.querySelector('#group-manage').addEventListener('click',event=>{if(busy()){event.preventDefault();root.querySelector('#group-status').textContent='編集中です。保存または取消後にグループ管理を開いてください。';}});
-    for(const event of ['answer-mode','candidate-mode','participants-rendered']) root.addEventListener(event,render);
+    for(const event of ['answer-mode','candidate-mode','participants-rendered','export-mode']) root.addEventListener(event,render);
     metadata?.addEventListener('toggle',render);render();
 }
 if(typeof document!=='undefined'){const root=document.querySelector('#candidate-grid');if(root)initialize(root);}

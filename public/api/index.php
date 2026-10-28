@@ -1,14 +1,14 @@
 <?php
 declare(strict_types=1);
 require dirname(__DIR__,2) . '/src/bootstrap.php';
-use Gyugyu\{Security,Database,Schedules,Participants,Groups,Summary,Problem};
+use Gyugyu\{Security,Database,Schedules,Participants,Groups,Summary,Export,Problem};
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store'); header('X-Content-Type-Options: nosniff');
 try {
     Security::authorize(); Security::session();
     $service = new Schedules(Database::connect());
     $route = $_GET['route'] ?? '/instances';
-    if (!is_string($route) || !preg_match('~^/instances(?:/([a-f0-9]{32})(/restore|/summary|/candidate-slots/(?:bulk|preview)|/participants(?:/([a-f0-9]{32})(/submission)?)?|/groups(?:/([a-f0-9]{32})(/restore)?)?)?)?$~D',$route,$m)) throw new Problem('見つかりません。',404);
+    if (!is_string($route) || !preg_match('~^/instances(?:/([a-f0-9]{32})(/restore|/summary|/export|/candidate-slots/(?:bulk|preview)|/participants(?:/([a-f0-9]{32})(/submission)?)?|/groups(?:/([a-f0-9]{32})(/restore)?)?)?)?$~D',$route,$m)) throw new Problem('見つかりません。',404);
     $method = $_SERVER['REQUEST_METHOD']; $id = $m[1] ?? null; $operation = $m[2] ?? ''; $restore = $operation === '/restore'; $bulk = $operation === '/candidate-slots/bulk';
     $participantId=$m[3] ?? null; $groupId=($m[5] ?? '') ?: null; $groupRestore=isset($m[6]);
     $data = [];
@@ -26,6 +26,10 @@ try {
     if ($method === 'GET' && $operation === '') {
         $result = $id ? $service->get($id) : $service->listing(($_GET['deleted'] ?? '') === '1');
         header('X-CSRF-Token: '.$_SESSION['csrf']);
+    } elseif ($method==='GET' && $id && $operation==='/export') {
+        $file=(new Export(Database::connect()))->generate($id,$_GET);
+        header('Content-Type: '.$file['type']);header('Content-Disposition: attachment; filename="'.$file['filename'].'"');
+        header('Cache-Control: no-store');echo $file['content'];return;
     } elseif ($method==='GET' && $id && $operation==='/summary') {
         $mode=$_GET['mode'] ?? 'all';$selected=$_GET['group_ids'] ?? [];
         if (!is_string($mode)||!is_array($selected)) throw new Problem('集計条件が不正です。',422);

@@ -2,7 +2,7 @@
 
 PHP + SQLiteによる、共通Basic認証下のスケジュール調整アプリです。開発仕様の正本は [docs/SPEC.md](docs/SPEC.md) です。
 
-実装済み：複数案件の一覧・作成・プレビュー・詳細、調整名／説明編集、確認付き論理削除・復元、版数競合検知、監査ログ。日別候補グリッドと候補帯編集も実装済みです。参加者登録・共有回答編集・確認付き非表示化・参加者数／提出済人数も実装済みです。グループ管理・複数所属・参加者表示フィルターも実装済みです。○△×3行集計・未入力人数・暫定順位・表示モードも実装済みです。エクスポート・受付状態の変更UI/APIは後続です。
+実装済み：複数案件の一覧・作成・プレビュー・詳細、調整名／説明編集、確認付き論理削除・復元、版数競合検知、監査ログ。日別候補グリッドと候補帯編集も実装済みです。参加者登録・共有回答編集・確認付き非表示化・参加者数／提出済人数も実装済みです。グループ管理・複数所属・参加者表示フィルターも実装済みです。○△×3行集計・未入力人数・暫定順位・表示モードも実装済みです。CSV（ワイド／ロング／集計）・完全JSONエクスポートも実装済みです。受付状態の変更UI/APIは後続です。
 
 ## 必要環境と初期化
 
@@ -136,4 +136,18 @@ APIは `/instances/{id}/groups` のGET/POST、`/groups/{group_id}` のPATCH/DELE
 
 GET `/instances/{id}/summary?mode=all|include|exclude&group_ids[]=...`（実際には既存の`route`クエリに続けて`&mode=...`）で同じ計算結果と版数を取得できます。同案件の有効グループ以外を拒否し、1つの読取りtransaction内で集計します。HTTP応答はno-storeです。追加試験は `python3 tests/summary_browser.py`。NodeテストはPHPとの1,280ケース照合も含むためテスト時はPHPが必要です。
 
-連続60/90分の候補推奨、CSV/JSON出力、日付追加削除、参加者復帰、受付終了・確定のUI/APIは後続です。
+連続60/90分の候補推奨、日付追加削除、参加者復帰、受付終了・確定のUI/APIは後続です。
+
+## CSV／JSONエクスポート
+
+案件詳細の出力欄からダウンロードします。**サーバー上の現在の保存済みスナップショット**を生成するため、他端末の更新により画面読込み時点とは異なる場合があります。編集中は出力不可、生成中は新しい編集・表示条件変更を停止します。失敗しても入力・DBを変更しません。生成日時と版数を出力に含めます。
+
+API例：`api/index.php?route=/instances/{id}/export&format=long&scope=mask&mode=include&group_ids[]={group_id}`。
+
+- `format=json`: 全履歴固定。`scope=all`、マスク指定なし。UTF-8、BOMなし。案件・日・全48枠・候補フラグ・active/inactive参加者・active/archived群と所属・候補外やarchived日の回答を保持します。秘密設定・セッション・登録用submission_key・内部name_key・監査ログは出力しません。JSONはDB文字列をCSV防御で変更せず、整数・真偽値・nullを保持します。unknownは回答レコードなしです。
+- `format=wide|long|summary`: UTF-8 BOMあり、行区切りCRLF、RFC4180形式の二重引用符処理。scopeは全有効参加者`all`／現在のマスク`mask`。有効日の有効候補のみ。マスクは既存集計と同じall/include/exclude・ORです。JSONはCSV範囲指定を受け付けません。
+- CSV共通列は案件ID・名前・説明・timezone・status・案件/schema/answers版数・生成日時・scope・mask_mode・選択グループIDのJSON配列。ワイドは参加者ID・氏名・所属JSON配列に続き、JST開始/終了とslot IDを列名とする○△×/空欄。ロングは参加者情報＋slot/day ID、UTC/JST開始終了、yes/maybe/no/unknown。集計はslot/day ID、UTC/JST開始終了、N/Y/T/X/U/score/provisional/all_yesです。対象0人の集計ではN=0、Y/T/X/U/scoreは「—」、フラグ0です。候補0件のロング/集計、対象0人のワイド/ロングはヘッダーのみです。
+- CSV文字列は先頭が`= + - @`、対応する全角記号、Unicode空白・制御文字の場合にアポストロフィを追加します。これはCSVセルだけの防御です。数値scoreの負値を文字列扱いして変更しません。
+- UTCは`Z`、JSTは`+09:00`、timezoneはAsia/Tokyo。ファイル名はASCIIの案件ID・UTC生成日時・scope・formatのみで、入力名は使用しません。Basic認証・no-store・nosniffを適用し、deleted案件は404、locked/confirmedは読取り出力できます。未対応queryや別案件/archived group IDは422です。
+
+完全JSONのschemaは`format_version:1, generated_at, scope, unknown_representation, instance, days, groups, participants`。各dayにslots、各participantに全所属group_idsとanswersを持ち、履歴状態はarchived_at/is_activeで識別します。これはimport機能やSQLite物理バックアップの代替ではありません。追加試験：`python3 tests/export_browser.py`。

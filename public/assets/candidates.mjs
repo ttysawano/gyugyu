@@ -77,10 +77,10 @@ function initialize(root) {
     function render() {
         $('candidate-tools').hidden = !editing;
         edit.hidden = editing;
-        edit.disabled = !!metadata?.open || !!root.dataset.answerEditing;
+        edit.disabled = !!metadata?.open || !!root.dataset.answerEditing || !!root.dataset.exporting;
         root.dataset.candidateEditing = editing ? '1' : '';
         root.dispatchEvent(new CustomEvent('candidate-mode',{detail:{editing}}));
-        if (metadata) metadata.hidden = editing;
+        if (metadata) metadata.hidden = editing || !!root.dataset.answerEditing || !!root.dataset.exporting;
         $('candidate-inputs').disabled = saving;
         $('candidate-save').disabled = saving || !draft.delta.changed;
         $('candidate-cancel').disabled = saving;
@@ -100,7 +100,8 @@ function initialize(root) {
     }
     metadata?.addEventListener('toggle',render);
     root.addEventListener('answer-mode',render);
-    edit.addEventListener('click',()=>{ editing=true; status('候補帯を編集中（未保存）'); render(); });
+    root.addEventListener('export-mode',render);
+    edit.addEventListener('click',()=>{ if(root.dataset.exporting||root.dataset.answerEditing||metadata?.open)return; editing=true; status('候補帯を編集中（未保存）'); render(); });
     $('candidate-scope').addEventListener('change',render);
     $('candidate-undo').addEventListener('click',()=>{ finish(); draft.undo(); status('Undo（未保存）'); render(); });
     $('candidate-redo').addEventListener('click',()=>{ finish(); draft.redo(); status('Redo（未保存）'); render(); });
