@@ -59,11 +59,27 @@ function initialize(root) {
     if (!edit) return;
     edit.hidden = false;
     const status = message => { $('candidate-status').textContent = message; };
-    const describe = delta => `${delta.days}日・変更${delta.changed}セル・候補外になる${delta.removed}セル。既存回答数0件（回答機能は未実装）。`;
+    const describe = (delta, affected = null) => `${delta.days}日・変更${delta.changed}セル・候補外になる${delta.removed}セル。${affected===null?'影響回答数はプレビューで確認します。':`隠れる回答${affected}件（削除せず保持）。`}`;
+    const masks = value => Object.entries(value).map(([day_id,candidates])=>({day_id,candidates}));
+    async function preview(value, signal) {
+        const response=await fetch(root.dataset.api+'/candidate-slots/preview',{method:'POST',signal,headers:{'Content-Type':'application/json','X-CSRF-Token':root.dataset.csrf},body:JSON.stringify({expected_version:version,expected_schema_revision:revision,masks:masks(value)})});
+        if(!response.ok) throw Error(response.status===409?'競合しました。下書きを控えて最新版を読み直してください。':`プレビューに失敗しました（HTTP ${response.status}）。下書きは保持しています。`);
+        return response.json();
+    }
+    function affectedAnswers(before,after,counts) {
+        let count=0;
+        for(const cell of cells) {
+            const day=cell.closest('[data-day]').dataset.day,i=Number(cell.dataset.ordinal);
+            if(before[day][i] && !after[day][i]) count+=counts[cell.dataset.slot] || 0;
+        }
+        return count;
+    }
     function render() {
         $('candidate-tools').hidden = !editing;
         edit.hidden = editing;
-        edit.disabled = !!metadata?.open;
+        edit.disabled = !!metadata?.open || !!root.dataset.answerEditing;
+        root.dataset.candidateEditing = editing ? '1' : '';
+        root.dispatchEvent(new CustomEvent('candidate-mode',{detail:{editing}}));
         if (metadata) metadata.hidden = editing;
         $('candidate-inputs').disabled = saving;
         $('candidate-save').disabled = saving || !draft.delta.changed;
@@ -83,6 +99,7 @@ function initialize(root) {
         if (inspectedCell) inspect({target:inspectedCell});
     }
     metadata?.addEventListener('toggle',render);
+    root.addEventListener('answer-mode',render);
     edit.addEventListener('click',()=>{ editing=true; status('候補帯を編集中（未保存）'); render(); });
     $('candidate-scope').addEventListener('change',render);
     $('candidate-undo').addEventListener('click',()=>{ finish(); draft.undo(); status('Undo（未保存）'); render(); });
@@ -96,17 +113,22 @@ function initialize(root) {
         if (draft.delta.changed && !confirm('下書きを破棄して最新版を読み直しますか？')) return;
         draft=new Draft(draft.base); window.location.reload();
     });
-    $('candidate-bulk').addEventListener('click',()=>{
+    $('candidate-bulk').addEventListener('click',async()=>{
+        if(saving) return;
         finish();
+        const controller=new AbortController(); const timeout=setTimeout(()=>controller.abort(),15000);
         try {
             const [start,end] = windowSlots($('candidate-start').value,$('candidate-end').value,$('candidate-next').checked);
             const ids = $('candidate-scope').value === 'all' ? Object.keys(draft.value) : [...$('candidate-days').querySelectorAll('input:checked')].map(input=>input.value);
             const next=bulkMask(draft.value,ids,start,end,$('candidate-operation').value);
-            const message=`対象${ids.length}日。${describe(difference(draft.value,next))}\n下書きへ適用しますか？（保存まではDBを変更しません）`;
+            saving=true; render();
+            const impact=await preview(next,controller.signal);
+            const message=`対象${ids.length}日。${describe(difference(draft.value,next),affectedAnswers(draft.value,next,impact.answer_counts))}\n下書きへ適用しますか？（保存まではDBを変更しません）`;
             $('candidate-preview').textContent=message;
             if (!confirm(message)) return;
             draft.replace(next); status('一括操作を下書きへ適用しました（未保存）'); render();
-        } catch (error) { status(error.message); }
+        } catch (error) { status('プレビュー失敗。下書きを保持しています。'+error.message); }
+        finally { clearTimeout(timeout); saving=false; render(); }
     });
     function paint(cell) {
         if (!stroke) return;
@@ -151,14 +173,16 @@ function initialize(root) {
         finish();
         if (!draft.delta.changed) return;
         const delta=draft.delta;
-        if (!confirm(describe(delta)+'\nこの内容で保存しますか？')) return;
-        saving=true; status('保存中…'); render();
+        saving=true; status('保存プレビュー中…'); render();
         const controller=new AbortController();
         const timeout=setTimeout(()=>controller.abort(),15000);
         try {
+            const impact=await preview(draft.value,controller.signal);
+            if (!confirm(describe(delta,impact.affected_answers)+'\nこの内容で保存しますか？')) { status('保存を取り消しました。下書きを保持しています。'); return; }
+            status('保存中…');
             const response=await fetch(root.dataset.api+'/candidate-slots/bulk',{
                 method:'PATCH', headers:{'Content-Type':'application/json','X-CSRF-Token':root.dataset.csrf}, signal:controller.signal,
-                body:JSON.stringify({expected_version:version,expected_schema_revision:revision,confirm_exclusion:delta.removed>0,masks:Object.entries(draft.value).map(([day_id,candidates])=>({day_id,candidates}))})
+                body:JSON.stringify({expected_version:version,expected_schema_revision:revision,expected_answers_revision:impact.answers_revision,confirm_exclusion:delta.removed>0,masks:Object.entries(draft.value).map(([day_id,candidates])=>({day_id,candidates}))})
             });
             if (!response.ok) {
                 if(response.status===409) {
@@ -179,6 +203,7 @@ function initialize(root) {
             version=row.version; revision=row.schema_revision;
             draft=new Draft(Object.fromEntries(row.days.map(day=>[day.id,day.slots.map(slot=>!!slot.is_candidate)])));
             editing=false; status('保存完了');
+            root.dispatchEvent(new CustomEvent('candidate-saved',{detail:row}));
         } catch (error) {
             status(error.name==='TypeError'||error.name==='AbortError' ? '通信に失敗しました。下書きを保持しています。保存結果が不明な場合は最新版と確認してください。' : error.message);
         } finally { clearTimeout(timeout); saving=false; render(); }
