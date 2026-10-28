@@ -46,7 +46,27 @@ This file applies to the entire repository. Keep it concise; product requirement
 4. For browser-visible changes, verify them in an actual browser when possible; document any unverified UI behavior instead of claiming it was tested.
 5. Maintain a useful `README.md` with local prerequisites, initialization, running tests, and deployment prerequisites once implementation begins.
 6. Report what changed, commands/tests run and results, and remaining limitations. Do not claim production readiness until the authentication boundary, security checks, backup/restore, and acceptance tests have been verified.
-7. Do not deploy to a live server, push to a remote, migrate production data, delete external resources, or introduce paid services without explicit user authorization. Normal in-scope local edits and non-destructive tests do not need special approval.
+
+## Autonomous development policy
+
+The user authorizes autonomous development of gyugyu
+through alpha and beta milestones.
+
+Within the scope of docs/SPEC.md, agents may:
+- Create feature branches and push commits.
+- Open and update pull requests.
+- Review and fix implementation issues.
+- Merge PRs after successful CI and review.
+- Start subsequent implementation phases without
+  requesting approval for every PR.
+
+Never bypass failing CI or branch protection.
+
+User approval is still required for production
+deployment, destructive production data changes,
+security weakening, or paid external services.
+
+Keep docs/SPEC.md, implementation, and tests aligned.
 
 ## Suggested implementation order
 
