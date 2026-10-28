@@ -122,6 +122,23 @@ try:
         page.locator('#participant-name').fill('😀'*80);save()
         assert any(person['display_name']=='😀'*80 for person in stored()['participants'])
         assert not errors,errors
+        # Arbitrary names must not collide with JavaScript object prototype properties.
+        duplicate_names=['constructor','__proto__','toString']
+        for name in duplicate_names:
+            add(name);save();add(name);save()
+        def check_duplicate_labels():
+            people=stored()['participants']
+            for name in duplicate_names:
+                matching=[person for person in people if person['display_name']==name]
+                assert len(matching)==2
+                for person in matching:
+                    buttons=page.locator(f'.participant-row[data-participant="{person["id"]}"] .participant-edit')
+                    expect(buttons).to_have_text([name+' #'+person['id'][:6]]*2)
+        check_duplicate_labels()
+        page.locator('#metadata-editor summary').click();page.locator('#metadata-editor summary').click()
+        check_duplicate_labels()
+        page.reload();expect(page.locator('#participant-add')).to_be_visible()
+        check_duplicate_labels()
         mobile=browser.new_context(extra_http_headers={'Authorization':HTTPTests.auth},viewport={'width':390,'height':844},is_mobile=True,has_touch=True)
         touch=mobile.new_page();touch.on('dialog',accept);touch.goto(url)
         touch.locator('.participant-edit').first.click();touch.locator('#answer-palette').select_option('maybe')

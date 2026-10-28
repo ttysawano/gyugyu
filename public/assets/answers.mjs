@@ -23,8 +23,8 @@ function initialize(root) {
     }
     function labels() {
         const people=new Map([...root.querySelectorAll('.participant-row')].map(row=>[row.dataset.participant,row.dataset.name]));
-        const counts={}; for(const name of people.values()) counts[name]=(counts[name]||0)+1;
-        for(const row of root.querySelectorAll('.participant-row')) row.querySelector('.participant-edit').textContent=row.dataset.participant==='draft'?'新規（未保存）':row.dataset.name+(counts[row.dataset.name]>1?' #'+row.dataset.participant.slice(0,6):'');
+        const counts=new Map(); for(const name of people.values()) counts.set(name,(counts.get(name)||0)+1);
+        for(const row of root.querySelectorAll('.participant-row')) row.querySelector('.participant-edit').textContent=row.dataset.participant==='draft'?'新規（未保存）':row.dataset.name+(counts.get(row.dataset.name)>1?' #'+row.dataset.participant.slice(0,6):'');
     }
     function render() {
         $('answer-tools').hidden=!active;
