@@ -1,6 +1,7 @@
 """Real Chromium interaction checks for candidate masks, using isolated HTTP fixtures."""
 import json
 import os
+import sqlite3
 from http_test import HTTPTests
 from playwright.sync_api import sync_playwright, expect
 
@@ -29,7 +30,19 @@ try:
         assert '24' in grids.nth(0).locator('thead').inner_text()
         assert cells.nth(0).bounding_box()['width']==16
         assert abs(grids.nth(0).bounding_box()['width']-916)<1
-        expect(cells.nth(6)).to_be_disabled()
+        expect(cells.nth(6)).to_be_enabled()
+        mutations=[]
+        page.on('request',lambda request:mutations.append(request.url) if request.method=='PATCH' else None)
+        # Keyboard focus, activation and clicks inspect exact half-hour times only.
+        cells.nth(6).focus(); page.keyboard.press('Tab')
+        expect(cells.nth(7)).to_be_focused()
+        expect(page.locator('#candidate-inspect')).to_have_text('2026-11-02 09:30〜10:00 候補（日本時間）')
+        page.keyboard.press('Space'); page.keyboard.press('Enter')
+        cells.nth(0).click()
+        expect(page.locator('#candidate-inspect')).to_have_text('2026-11-02 06:00〜06:30 候補外（日本時間）')
+        expect(cells.nth(0)).to_have_attribute('aria-pressed','false')
+        expect(cells.nth(7)).to_have_attribute('aria-pressed','true')
+        assert not mutations and stored()==row
         page.locator('#metadata-editor summary').click(); expect(page.locator('#candidate-edit')).to_be_disabled()
         page.locator('#metadata-editor summary').click()
         page.locator('#candidate-edit').click(); expect(page.locator('#metadata-editor')).to_be_hidden()
@@ -38,6 +51,25 @@ try:
             first.scroll_into_view_if_needed(); a=first.bounding_box(); b=last.bounding_box()
             page.mouse.move(a['x']+a['width']/2,a['y']+13); page.mouse.down()
             page.mouse.move(b['x']+b['width']/2,b['y']+13,steps=8)
+        # Leaving the row while still pressed breaks interpolation on re-entry.
+        drag(cells.nth(6),cells.nth(6))
+        page.mouse.move(1200,20)
+        b=cells.nth(20).bounding_box(); page.mouse.move(b['x']+8,b['y']+13); page.mouse.up()
+        for i in range(7,20): expect(cells.nth(i)).to_have_attribute('aria-pressed','true')
+        for i in [6,20]: expect(cells.nth(i)).to_have_attribute('aria-pressed','false')
+        page.locator('#candidate-undo').click()
+        # Different day panels also break interpolation, even when returning to day 1.
+        page.set_viewport_size({'width':1280,'height':2400})
+        drag(cells.nth(6),cells.nth(6))
+        second=page.locator('.day-panel').nth(1).locator('.candidate-cell')
+        b=second.nth(8).bounding_box(); page.mouse.move(b['x']+8,b['y']+13)
+        b=cells.nth(20).bounding_box(); page.mouse.move(b['x']+8,b['y']+13); page.mouse.up()
+        expect(second.nth(8)).to_have_attribute('aria-pressed','false')
+        for i in range(7,20): expect(cells.nth(i)).to_have_attribute('aria-pressed','true')
+        expect(second.nth(9)).to_have_attribute('aria-pressed','true')
+        page.locator('#candidate-undo').click()
+        expect(second.nth(8)).to_have_attribute('aria-pressed','true')
+        page.set_viewport_size({'width':1280,'height':1000})
         drag(cells.nth(6),cells.nth(9))
         page.mouse.move(1200,20); page.mouse.up()
         for i in range(6,10): expect(cells.nth(i)).to_have_attribute('aria-pressed','false')
@@ -123,6 +155,10 @@ try:
         mobile=browser.new_context(extra_http_headers={'Authorization':HTTPTests.auth},viewport={'width':390,'height':844},is_mobile=True,has_touch=True)
         touch=mobile.new_page(); touch.on('dialog',accept); touch.goto(url)
         expect(touch.locator('#candidate-edit')).to_be_visible()
+        before_tap=stored()
+        touch.locator('.candidate-cell').nth(7).tap()
+        expect(touch.locator('#candidate-inspect')).to_have_text('2026-11-02 09:30〜10:00 候補外（日本時間）')
+        assert stored()==before_tap
         strip=touch.locator('.day-scroll').nth(0); strip.scroll_into_view_if_needed()
         box=strip.bounding_box(); cdp=mobile.new_cdp_session(touch)
         y=touch.locator('.day-grid thead').nth(0).bounding_box()['y']+12
@@ -145,8 +181,17 @@ try:
         for i in range(6,10): expect(tcells.nth(i)).to_have_attribute('aria-pressed','false')
         touch.locator('#candidate-cancel').click()
         assert stored()['schema_revision']==4
+        # Read-only lifecycle states still permit inspection, with no edit control.
+        for state in ['locked','confirmed']:
+            with sqlite3.connect(HTTPTests.env['GYUGYU_DB']) as db:
+                db.execute('UPDATE instances SET status=? WHERE id=?',(state,row['id']))
+            touch.goto(url)
+            expect(touch.locator('#candidate-edit')).to_have_count(0)
+            touch.locator('.candidate-cell').nth(7).tap()
+            expect(touch.locator('#candidate-inspect')).to_have_text('2026-11-02 09:30〜10:00 候補外（日本時間）')
+            assert stored()['schema_revision']==4
         mobile.close()
         browser.close()
-    print('PASS: Chromium grid density, bulk/drag, outside release, pointer cancel, undo/redo, cancel, network failure, lost response, repeated conflict, mobile scroll')
+    print('PASS: Chromium read-only keyboard/tap inspection, grid density, bulk/drag, outside re-entry, cross-day drag, pointer cancel, undo/redo, cancel, network failure, lost response, repeated conflict, mobile touch/scroll')
 finally:
     HTTPTests.tearDownClass()

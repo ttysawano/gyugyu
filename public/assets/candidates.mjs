@@ -46,6 +46,16 @@ function initialize(root) {
     let version = Number(root.dataset.version), revision = Number(root.dataset.revision);
     const edit = $('candidate-edit'), metadata = document.querySelector('#metadata-editor');
     $('grid-density').addEventListener('change',e=>{ root.dataset.density=e.target.value; });
+    let inspectedCell = null;
+    function inspect(event) {
+        const cell = event.target.closest('.candidate-cell');
+        if (cell && root.contains(cell)) {
+            inspectedCell = cell;
+            $('candidate-inspect').textContent = cell.getAttribute('aria-label')+'（日本時間）';
+        }
+    }
+    // Inspection never mutates masks, including locked/confirmed schedules.
+    for (const event of ['focusin','click','pointerover']) root.addEventListener(event,inspect);
     if (!edit) return;
     edit.hidden = false;
     const status = message => { $('candidate-status').textContent = message; };
@@ -68,8 +78,9 @@ function initialize(root) {
             const value = draft.value[cell.closest('[data-day]').dataset.day][Number(cell.dataset.ordinal)];
             cell.setAttribute('aria-pressed',String(value)); cell.textContent = value ? '●' : '—';
             cell.setAttribute('aria-label',cell.dataset.label+' '+(value?'候補':'候補外'));
-            cell.disabled = !editing || saving;
+            cell.disabled = saving;
         }
+        if (inspectedCell) inspect({target:inspectedCell});
     }
     metadata?.addEventListener('toggle',render);
     edit.addEventListener('click',()=>{ editing=true; status('候補帯を編集中（未保存）'); render(); });
@@ -98,7 +109,8 @@ function initialize(root) {
         } catch (error) { status(error.message); }
     });
     function paint(cell) {
-        if (!stroke || !cell || !root.contains(cell)) return;
+        if (!stroke) return;
+        if (!cell || !root.contains(cell)) { stroke.last = null; return; }
         const day=cell.closest('[data-day]').dataset.day, i=Number(cell.dataset.ordinal);
         const from=stroke.last?.day===day ? stroke.last.i : i;
         for(let n=Math.min(from,i);n<=Math.max(from,i);n++) draft.value[day][n]=stroke.value;
