@@ -5,6 +5,7 @@ require_once __DIR__ . '/grid.php';
 require_once __DIR__ . '/group-page.php';
 require_once __DIR__ . '/day-page.php';
 require_once __DIR__ . '/participant-page.php';
+require_once __DIR__ . '/reception-page.php';
 use Gyugyu\{Security,Schedules,Database,Problem};
 function h(mixed $s): string { return htmlspecialchars((string)$s, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); }
 function jstTime(string $utc): string { return (new DateTimeImmutable($utc))->setTimezone(new DateTimeZone('Asia/Tokyo'))->format('Y-m-d H:i:s') . ' JST'; }
@@ -29,6 +30,7 @@ function runWeb(): void {
     if (!in_array($method,['GET','POST'],true)) throw new Problem('許可されていないメソッドです。',405);
     $id = $_GET['id'] ?? '';
     if (!is_string($id)) throw new Problem('IDが不正です。',400);
+    if ($page === 'reception.php') { receptionPage($id,$method); return; }
     if ($page === 'participants.php') { participantPage($id,$method); return; }
     if ($page === 'days.php') { dayPage($id,$method); return; }
     if ($page === 'groups.php') { groupPage($service,$id,$method); return; }
@@ -69,10 +71,10 @@ function runWeb(): void {
             if ($row['description'] !== '') echo '<div class="description">'.h($row['description']).'</div>';
             echo '<p>状態: '.h($row['status']).' · 日本時間 · 更新: '.h(jstTime($row['updated_at'])).'</p>';
             candidateGrid($row);
-            echo '<details id="metadata-editor"'.($error?' open':'').'><summary>調整名・説明を編集</summary><form method="post">';
+            echo '<details id="metadata-editor"'.($error?' open':'').'><summary>調整名・説明を編集</summary><form method="post"><fieldset'.($row['status']==='open'?'':' disabled').'><legend>受付中のみ編集できます</legend>';
             // Preserve the submitted version after a conflict; never silently retry a stale edit.
             fields($error ? ['version'=>$_POST['expected_version'] ?? 0] : $row); metadata($error ? $_POST : $row);
-            echo '<button name="action" value="edit">保存</button> <a href="'.url('event.php?id='.$id).'">取消</a><p>競合時は入力を控え、再読み込みしてから変更内容を確認してください。</p></form></details><p><a href="'.url('delete.php?id='.$id).'">削除</a> · <a href="'.url().'">一覧へ戻る</a></p>';
+            echo '<button name="action" value="edit">保存</button> <a href="'.url('event.php?id='.$id).'">取消</a><p>競合時は入力を控え、再読み込みしてから変更内容を確認してください。</p></fieldset></form></details><p><a href="'.url('delete.php?id='.$id).'">削除</a> · <a href="'.url().'">一覧へ戻る</a></p>';
         }
     } else {
         $deleted = ($_GET['deleted'] ?? '') === '1'; headerPage($deleted ? '削除済みスケジュール' : 'スケジュール一覧');
