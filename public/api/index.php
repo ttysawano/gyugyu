@@ -8,7 +8,7 @@ try {
     Security::authorize(); Security::session();
     $service = new Schedules(Database::connect());
     $route = $_GET['route'] ?? '/instances';
-    if (!is_string($route) || !preg_match('~^/instances(?:/([a-f0-9]{32})(/restore|/summary|/export|/days(?:/preview)?|/candidate-slots/(?:bulk|preview)|/participants(?:/([a-f0-9]{32})(/submission)?)?|/groups(?:/([a-f0-9]{32})(/restore)?)?)?)?$~D',$route,$m)) throw new Problem('見つかりません。',404);
+    if (!is_string($route) || !preg_match('~^/instances(?:/([a-f0-9]{32})(/restore|/summary|/export|/days(?:/preview)?|/candidate-slots/(?:bulk|preview)|/participants(?:/inactive|/([a-f0-9]{32})(/submission|/restore)?)?|/groups(?:/([a-f0-9]{32})(/restore)?)?)?)?$~D',$route,$m)) throw new Problem('見つかりません。',404);
     $method = $_SERVER['REQUEST_METHOD']; $id = $m[1] ?? null; $operation = $m[2] ?? ''; $restore = $operation === '/restore'; $bulk = $operation === '/candidate-slots/bulk';
     $participantId=$m[3] ?? null; $groupId=($m[5] ?? '') ?: null; $groupRestore=isset($m[6]);
     $data = [];
@@ -26,7 +26,9 @@ try {
     if ($method === 'GET' && $operation === '') {
         $result = $id ? $service->get($id) : $service->listing(($_GET['deleted'] ?? '') === '1');
         header('X-CSRF-Token: '.$_SESSION['csrf']);
-    } elseif ($method==='GET' && $id && $operation==='/days') $result=(new Days(Database::connect()))->listing($id);
+    } elseif ($method==='GET' && $id && $operation==='/participants/inactive') $result=(new Participants(Database::connect()))->inactive($id);
+    elseif ($method==='POST' && $id && $participantId && ($m[4] ?? '')==='/restore') $result=(new Participants(Database::connect()))->restore($id,$participantId,$data);
+    elseif ($method==='GET' && $id && $operation==='/days') $result=(new Days(Database::connect()))->listing($id);
     elseif ($id && in_array($operation,['/days','/days/preview'],true) && in_array($method,['POST','DELETE'],true)) {
         $action=$method==='DELETE'?'archive':($data['action'] ?? 'add');
         if (!is_string($action)||($operation==='/days/preview'&&$method!=='POST')||($operation==='/days'&&$method==='POST'&&$action==='archive')) throw new Problem('日付操作が不正です。',422);
@@ -52,7 +54,7 @@ try {
     elseif ($method === 'POST' && $id && $operation === '/candidate-slots/preview') $result=$service->candidates($id,$data,true);
     elseif ($method === 'POST' && $id && $operation === '/participants') { $result=(new Participants(Database::connect()))->submit($id,null,$data); http_response_code(201); }
     elseif ($method === 'PATCH' && $id && $participantId && !isset($m[4])) $result=(new Participants(Database::connect()))->deactivate($id,$participantId,$data);
-    elseif ($method === 'PUT' && $id && $participantId && isset($m[4])) $result=(new Participants(Database::connect()))->submit($id,$participantId,$data);
+    elseif ($method === 'PUT' && $id && $participantId && ($m[4] ?? '')==='/submission') $result=(new Participants(Database::connect()))->submit($id,$participantId,$data);
     elseif ($method === 'PATCH' && $id && $bulk) $result = $service->candidates($id,$data);
     elseif ($method === 'PATCH' && $id && $operation === '') $result = $service->change($id,'edit',$data);
     elseif ($method === 'DELETE' && $id && $operation === '') $result = $service->change($id,'delete',$data);
