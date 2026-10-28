@@ -136,7 +136,7 @@ APIは `/instances/{id}/groups` のGET/POST、`/groups/{group_id}` のPATCH/DELE
 
 GET `/instances/{id}/summary?mode=all|include|exclude&group_ids[]=...`（実際には既存の`route`クエリに続けて`&mode=...`）で同じ計算結果と版数を取得できます。同案件の有効グループ以外を拒否し、1つの読取りtransaction内で集計します。HTTP応答はno-storeです。追加試験は `python3 tests/summary_browser.py`。NodeテストはPHPとの1,280ケース照合も含むためテスト時はPHPが必要です。
 
-連続60/90分の候補推奨、日時確定・取消は下記の専用機能で実装済みです。
+連続60/90分の候補推奨は未実装で、今回の対象外です。30分候補枠の日時確定・取消は下記の専用機能で実装済みです。
 
 ## CSV／JSONエクスポート
 
