@@ -33,9 +33,21 @@ try:
   page.locator('#answer-save').click();expect(page.locator('#answer-status')).to_have_text('回答の保存完了');expect(cell('maybe')).to_have_text('1')
   # Summary rows stay below newly registered participant rows.
   page.locator('#participant-add').click();expect(panel.locator('tbody tr').last).to_have_class('summary-row');page.locator('#answer-cancel').click()
-  page.locator('#candidate-edit').click();page.locator('#candidate-palette').select_option('false');candidate=panel.locator('.candidate-cell').nth(6);candidate.focus();page.keyboard.press('Space');expect(cell('maybe')).to_have_text('1')
-  page.locator('#candidate-save').click();expect(page.locator('#candidate-status')).to_contain_text('保存');expect(cell('maybe')).to_have_text('')
-  assert row['days'][0]['slots'][6]['id'] not in json.loads(api.request(route+'/summary')[2])['ranking']
+  # SPEC 15.4: actual drag exclusion/restoration must update summaries without losing answers.
+  saved_people=json.loads(api.request(route)[2])['participants']
+  saved_states=[next((a['state'] for a in person['answers'] if a['slot_id']==row['days'][0]['slots'][6]['id']),'unknown') for person in saved_people if group in person['group_ids']]
+  for enabled in [False,True]:
+   page.locator('#candidate-edit').click();page.locator('#candidate-palette').select_option(str(enabled).lower())
+   candidate=panel.locator('.candidate-cell').nth(6);candidate.scroll_into_view_if_needed()
+   a=candidate.bounding_box();b=panel.locator('.candidate-cell').nth(7).bounding_box()
+   page.mouse.move(a['x']+8,a['y']+13);page.mouse.down();page.mouse.move(b['x']+8,b['y']+13,steps=4);page.mouse.up()
+   expect(cell('maybe')).to_have_text('' if enabled else '1')
+   page.locator('#candidate-save').click();expect(page.locator('#candidate-status')).to_have_text('保存完了')
+   for state in ['yes','maybe','no']:
+    expect(cell(state)).to_have_text(str(saved_states.count(state)) if enabled else '')
+   summary=json.loads(api.request(route+'/summary')[2])
+   assert (row['days'][0]['slots'][6]['id'] in summary['ranking'])==enabled
+   assert json.loads(api.request(route)[2])['participants']==saved_people
   page.set_viewport_size({'width':390,'height':844});assert cell().bounding_box()['width']==16;assert panel.locator('.day-scroll').evaluate('(e)=>e.scrollWidth>e.clientWidth')
   cell('yes',7).focus();page.keyboard.press('Space');expect(page.locator('#summary-detail')).to_contain_text('未入力2人')
   page.set_viewport_size({'width':1280,'height':1600})
@@ -47,5 +59,5 @@ try:
   touch.locator('.day-panel').first.locator('.summary-cell[data-state="yes"]').nth(7).tap();expect(touch.locator('#summary-detail')).to_contain_text('対象3人／未入力3人');touch.close()
   assert not errors,errors
   browser.close()
- print('PASS: Chromium three summary rows, shared mask/modes, details, provisional, saved-only drafts, refresh and mobile')
+ print('PASS: Chromium three summary rows, shared mask/modes, details, provisional, saved-only drafts, refresh, drag exclusion/restored counts and mobile')
 finally:HTTPTests.tearDownClass()

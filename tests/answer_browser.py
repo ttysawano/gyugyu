@@ -151,6 +151,17 @@ try:
         assert tcells.nth(0).bounding_box()['width']==16
         assert touch.evaluate('document.documentElement.scrollWidth <= innerWidth')
         touch.locator('#answer-cancel').click();touch.screenshot(path='/tmp/gyugyu-answers-mobile.png',full_page=True);mobile.close();browser.close()
-    print('PASS: Chromium participant registration, shared editing, answers, unknown, drag/cancel, failure/lost response, conflict, actual exclusion race/history, hide, keyboard/touch/mobile')
+        # SPEC 15.5: close the browser process, then read every saved answer in a new session.
+        persisted=stored()
+        browser=p.chromium.launch(executable_path=os.environ.get('CHROMIUM_BINARY','/usr/bin/chromium'),headless=True,args=['--no-sandbox'])
+        reopened=browser.new_page(extra_http_headers={'Authorization':HTTPTests.auth});reopened.goto(url)
+        for person in persisted['participants']:
+            values={a['slot_id']:a['state'] for a in person['answers']}
+            for day_index,day in enumerate(persisted['days']):
+                actual=reopened.locator('.day-panel').nth(day_index).locator(f'.participant-row[data-participant="{person["id"]}"] .answer-cell')
+                expect(actual).to_have_text([{'yes':'○','maybe':'△','no':'×','unknown':'—'}[values.get(slot['id'],'unknown')] for slot in day['slots']])
+        assert stored()==persisted
+        browser.close()
+    print('PASS: Chromium participant registration, shared editing, answers, unknown, drag/cancel, failure/lost response, conflict, actual exclusion race/history, hide, keyboard/touch/mobile, browser-process restart persistence')
 finally:
     HTTPTests.tearDownClass()
