@@ -54,14 +54,20 @@ final class Schedules
     }
     public function get(string $id, bool $deleted = false): array
     {
-        $owns=!$this->db->inTransaction();
-        if ($owns) $this->db->beginTransaction();
+        // PDO 8.3 does not reliably report transactions started with SQL BEGIN IMMEDIATE.
+        // A savepoint gives a consistent read both standalone and inside existing writes.
+        $this->db->exec('SAVEPOINT schedule_read');
         try {
             $row=$this->readSnapshot($id,$deleted);
-            if ($owns) $this->db->commit();
+            $this->db->exec('RELEASE SAVEPOINT schedule_read');
             return $row;
-        } catch (\Throwable $e) { if ($owns) $this->db->rollBack();throw $e; }
+        } catch (\Throwable $e) {
+            $this->db->exec('ROLLBACK TO SAVEPOINT schedule_read');
+            $this->db->exec('RELEASE SAVEPOINT schedule_read');
+            throw $e;
+        }
     }
+
     private function readSnapshot(string $id,bool $deleted): array
     {
         $q = $this->db->prepare('SELECT * FROM instances WHERE id=? AND deleted_at IS ' . ($deleted ? 'NOT NULL' : 'NULL'));
