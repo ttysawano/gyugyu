@@ -6,7 +6,7 @@ $count = 0;
 function check(bool $ok, string $message): void { global $count; $count++; if (!$ok) throw new RuntimeException($message); }
 function rejects(callable $fn, int $code): void { try { $fn(); } catch (Problem $e) { check($e->getCode() === $code, $e->getMessage()); return; } throw new RuntimeException('Expected rejection '.$code); }
 $db = Database::connect(':memory:'); Database::migrate($db); Database::migrate($db);
-check($db->query('SELECT COUNT(*) FROM migrations')->fetchColumn() === 1, 'idempotent migration');
+check($db->query('SELECT COUNT(*) FROM migrations')->fetchColumn() === 2, 'idempotent migration');
 $s = new Schedules($db);
 $data = ['title'=>' 実験調整 ','description'=>"一行\r\n<script>alert(1)</script>\r三行",'dates'=>['2026-11-04','2026-11-02','2026-11-04'],'initial_window'=>['start'=>'09:00','end'=>'18:00']];
 $p = Schedules::preview($data); check($p['duplicate_count'] === 1 && $p['dates'][0] === '2026-11-02', 'deduplication and sort');
@@ -56,4 +56,5 @@ foreach (['1900-01-01','2000-02-29','9998-12-31'] as $date) {
 }
 check($db->query("SELECT COUNT(*) FROM audit_log WHERE action='edit'")->fetchColumn()===1,'rejected edits leave no audit entry');
 require __DIR__.'/candidates.php';
+require __DIR__.'/participants.php';
 echo "PASS: $count assertions\n";

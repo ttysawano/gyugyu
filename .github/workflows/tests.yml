@@ -14,7 +14,7 @@ jobs:
           while IFS= read -r -d '' file; do
             php -l "$file" || exit 1
           done < <(find src public bin tests -name '*.php' -print0)
-      - run: node --test tests/candidates.test.mjs
+      - run: node --test tests/*.test.mjs
       - run: |
           python3 -m venv /tmp/gyugyu-test-venv
           /tmp/gyugyu-test-venv/bin/pip install playwright==1.58.0
@@ -23,4 +23,5 @@ jobs:
           export CHROMIUM_BINARY="$(/tmp/gyugyu-test-venv/bin/python -c 'from playwright.sync_api import sync_playwright; p=sync_playwright().start(); print(p.chromium.executable_path); p.stop()')"
           /tmp/gyugyu-test-venv/bin/python tests/browser.py
           /tmp/gyugyu-test-venv/bin/python tests/candidate_browser.py
+          /tmp/gyugyu-test-venv/bin/python tests/answer_browser.py
       - run: git diff --check

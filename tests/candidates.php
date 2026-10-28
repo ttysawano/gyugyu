@@ -5,7 +5,7 @@ $db=Database::connect(':memory:'); Database::migrate($db); $s=new Schedules($db)
 $row=$s->create(['title'=>'候補帯','dates'=>['2026-11-02','2026-11-03']]);
 $other=$s->create(['title'=>'別案件','dates'=>['2026-11-02']]);
 $mask=fn(array $day)=>['day_id'=>$day['id'],'candidates'=>array_map(fn($slot)=>(bool)$slot['is_candidate'],$day['slots'])];
-$payload=['expected_version'=>1,'expected_schema_revision'=>1,'masks'=>array_map($mask,$row['days'])];
+$payload=['expected_version'=>1,'expected_schema_revision'=>1,'expected_answers_revision'=>1,'masks'=>array_map($mask,$row['days'])];
 $before=$s->get($row['id']);
 check($s->candidates($row['id'],$payload)===$before,'no-op does not advance revision');
 $changed=$payload; $changed['masks'][0]['candidates'][6]=false; $changed['masks'][1]['candidates'][47]=true;

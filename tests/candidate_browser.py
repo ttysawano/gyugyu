@@ -99,7 +99,8 @@ try:
         page.locator('#candidate-days input').nth(0).check()
         page.locator('#candidate-start').fill('22:00'); page.locator('#candidate-end').fill('06:00'); page.locator('#candidate-next').check()
         page.locator('#candidate-bulk').click()
-        assert '対象1日' in dialogs[-1] and '既存回答数0件' in dialogs[-1]
+        expect(page.locator('#candidate-status')).to_contain_text('一括操作を下書きへ適用')
+        assert '対象1日' in dialogs[-1] and '隠れる回答0件' in dialogs[-1]
         expect(cells.nth(32)).to_have_attribute('aria-pressed','true')
         expect(page.locator('.day-panel').nth(1).locator('.candidate-cell').nth(32)).to_have_attribute('aria-pressed','false')
         assert stored()['schema_revision']==1
@@ -122,7 +123,7 @@ try:
         for _ in range(2):
             other.locator('#candidate-save').click()
             expect(other.locator('#candidate-status')).to_contain_text('競合しました')
-            expect(other.locator('#candidate-status')).to_contain_text('最新版との差')
+            expect(other.locator('#candidate-status')).to_contain_text('最新版')
             expect(other.locator('.candidate-cell').nth(32)).to_have_attribute('aria-pressed','false')
         assert stored()['schema_revision']==3
         other.locator('#candidate-cancel').click(); other.close()

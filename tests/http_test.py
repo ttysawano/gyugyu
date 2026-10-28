@@ -110,7 +110,7 @@ class HTTPTests(unittest.TestCase):
         self.assertEqual(status,201); row=json.loads(body)
         route='api/index.php?route=/instances/'+row['id']+'/candidate-slots/bulk'
         values=[bool(slot['is_candidate']) for slot in row['days'][0]['slots']]; values[6]=False
-        payload={'expected_version':1,'expected_schema_revision':1,'confirm_exclusion':True,'masks':[{'day_id':row['days'][0]['id'],'candidates':values}]}
+        payload={'expected_version':1,'expected_schema_revision':1,'expected_answers_revision':1,'confirm_exclusion':True,'masks':[{'day_id':row['days'][0]['id'],'candidates':values}]}
         self.assertEqual(self.request(route,'PATCH',payload,auth=False,token=token)[0],401)
         self.assertEqual(self.request(route,'PATCH',payload)[0],403)
         self.assertEqual(self.request(route,'PATCH',payload,token=token,origin='https://evil.example')[0],403)
@@ -125,14 +125,46 @@ class HTTPTests(unittest.TestCase):
         status,headers,_=self.request('assets/candidates.mjs')
         self.assertEqual(status,200); self.assertIn('javascript',headers['Content-Type'])
 
+    def test_participant_submission(self):
+        _,headers,_=self.request('api/index.php'); token=headers['X-CSRF-Token']
+        _,_,body=self.request('api/index.php','POST',{'title':'回答API','dates':['2026-11-02']},token=token)
+        row=json.loads(body); route='api/index.php?route=/instances/'+row['id']; slot=row['days'][0]['slots'][6]['id']
+        data={'expected_version':1,'expected_schema_revision':1,'submission_key':'c'*32,'display_name':'<b>参加者</b>','group_ids':[],'answers':[{'slot_id':slot,'state':'maybe'}]}
+        for auth,tok,origin in [(False,token,True),(True,None,True),(True,token,'https://evil.example')]:
+            self.assertEqual(self.request(route+'/participants','POST',data,auth=auth,token=tok,origin=origin)[0],401 if not auth else 403)
+        status,_,body=self.request(route+'/participants','POST',data,token=token)
+        self.assertEqual(status,201); participant=json.loads(body); pid=participant['id']
+        self.assertNotIn('submission_key',participant)
+        self.assertEqual(self.request(route+'/participants','POST',data,token=token)[0],409)
+        page=self.request('event.php?id='+row['id'])[2]
+        self.assertIn('&lt;b&gt;参加者&lt;/b&gt;',page); self.assertNotIn('<b>参加者</b>',page)
+        # Independent browser session, same shared Basic account: no person-specific secret.
+        self.client=urllib.request.build_opener(urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
+        _,headers,_=self.request('api/index.php'); token=headers['X-CSRF-Token']
+        update={'expected_version':1,'expected_schema_revision':1,'expected_participant_version':1,'display_name':'別端末で修正','answers':[]}
+        self.assertEqual(self.request(route+'/participants/'+pid+'/submission','PUT',dict(update,answers={}),token=token)[0],422)
+        status,_,body=self.request(route+'/participants/'+pid+'/submission','PUT',update,token=token)
+        self.assertEqual(status,200); saved=json.loads(body)
+        self.assertEqual(saved['answers'],[]); self.assertIsNotNone(saved['submitted_at'])
+        self.assertEqual(self.request(route+'/participants/'+pid+'/submission','PUT',update,token=token)[0],409)
+        self.assertEqual(self.request('assets/answers.mjs',auth=False)[0],401)
+        self.assertEqual(self.request('assets/answers.mjs')[0],200)
+        mask={'expected_version':1,'expected_schema_revision':1,'masks':[{'day_id':row['days'][0]['id'],'candidates':[False]*48}]}
+        status,_,body=self.request(route+'/candidate-slots/preview','POST',mask,token=token)
+        self.assertEqual(status,200); impact=json.loads(body); self.assertEqual(impact['affected_answers'],0)
+        update.update(expected_participant_version=2,answers=[{'slot_id':slot,'state':'no'}])
+        self.assertEqual(self.request(route+'/participants/'+pid+'/submission','PUT',update,token=token)[0],200)
+        mask.update(expected_answers_revision=impact['answers_revision'],confirm_exclusion=True)
+        self.assertEqual(self.request(route+'/candidate-slots/bulk','PATCH',mask,token=token)[0],409)
+
     def test_backup_restore(self):
-        fixture = "require " + json.dumps(str(ROOT/'src/bootstrap.php')) + "; $s=new Gyugyu\\Schedules(Gyugyu\\Database::connect()); $r=$s->create(['title'=>'backup fixture','dates'=>['2026-11-05']]); echo $r['id'];"
+        fixture = "require " + json.dumps(str(ROOT/'src/bootstrap.php')) + "; $s=new Gyugyu\\Schedules(Gyugyu\\Database::connect()); $r=$s->create(['title'=>'backup fixture','dates'=>['2026-11-05']]);  $p=new Gyugyu\\Participants(Gyugyu\\Database::connect()); $p->submit($r['id'],null,['display_name'=>'backup participant','expected_version'=>1,'expected_schema_revision'=>1,'submission_key'=>str_repeat('a',32),'answers'=>[['slot_id'=>$r['days'][0]['slots'][6]['id'],'state'=>'yes']]]); echo $r['id'];"
         ident=subprocess.check_output([PHP,'-r',fixture],env=self.env).decode()
         target=self.tmp.name+'/backup.sqlite'
         subprocess.run([PHP,str(ROOT/'bin/backup.php'),target],env=self.env,check=True,capture_output=True)
         checkcode = "require " + json.dumps(str(ROOT/'src/bootstrap.php')) + "; $d=Gyugyu\\Database::connect(); if($d->query('PRAGMA integrity_check')->fetchColumn()!=='ok' || $d->query('PRAGMA foreign_key_check')->fetchAll()!==[]) exit(1); Gyugyu\\Database::migrate($d);"
         subprocess.run([PHP,'-r',checkcode],env=dict(self.env,GYUGYU_DB=target),check=True,capture_output=True)
-        restored="require " + json.dumps(str(ROOT/'src/bootstrap.php')) + "; $s=new Gyugyu\\Schedules(Gyugyu\\Database::connect()); $r=$s->get('"+ident+"'); if($r['title']!=='backup fixture' || count($r['days'][0]['slots'])!==48) exit(1);"
+        restored="require " + json.dumps(str(ROOT/'src/bootstrap.php')) + "; $s=new Gyugyu\\Schedules(Gyugyu\\Database::connect()); $r=$s->get('"+ident+"'); if($r['title']!=='backup fixture' || count($r['days'][0]['slots'])!==48 || count($r['participants'])!==1 || $r['participants'][0]['answers'][0]['state']!=='yes') exit(1);"
         subprocess.run([PHP,'-r',restored],env=dict(self.env,GYUGYU_DB=target),check=True,capture_output=True)
         # Existing destinations must not be overwritten.
         self.assertNotEqual(subprocess.run([PHP,str(ROOT/'bin/backup.php'),target],env=self.env,capture_output=True).returncode,0)

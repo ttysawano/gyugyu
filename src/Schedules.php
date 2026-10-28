@@ -49,7 +49,7 @@ final class Schedules
     }
     public function listing(bool $deleted = false): array
     {
-        $q = $this->db->prepare('SELECT i.id,i.title,i.status,i.version,i.updated_at,COUNT(d.id) AS day_count,MIN(d.local_date) AS first_date,MAX(d.local_date) AS last_date FROM instances i LEFT JOIN instance_days d ON d.instance_id=i.id AND d.archived_at IS NULL WHERE i.deleted_at IS ' . ($deleted ? 'NOT NULL' : 'NULL') . ' GROUP BY i.id ORDER BY i.updated_at DESC,i.id');
+        $q = $this->db->prepare('SELECT i.id,i.title,i.status,i.version,i.updated_at,(SELECT COUNT(*) FROM participants p WHERE p.instance_id=i.id AND p.is_active=1) AS participant_count,(SELECT COUNT(*) FROM participants p WHERE p.instance_id=i.id AND p.is_active=1 AND p.submitted_at IS NOT NULL) AS submitted_count,COUNT(d.id) AS day_count,MIN(d.local_date) AS first_date,MAX(d.local_date) AS last_date FROM instances i LEFT JOIN instance_days d ON d.instance_id=i.id AND d.archived_at IS NULL WHERE i.deleted_at IS ' . ($deleted ? 'NOT NULL' : 'NULL') . ' GROUP BY i.id ORDER BY i.updated_at DESC,i.id');
         $q->execute(); return $q->fetchAll();
     }
     public function get(string $id, bool $deleted = false): array
@@ -61,6 +61,9 @@ final class Schedules
         $row['days'] = $q->fetchAll();
         $q = $this->db->prepare('SELECT * FROM day_slots WHERE day_id=? ORDER BY ordinal');
         foreach ($row['days'] as &$day) { $q->execute([$day['id']]); $day['slots'] = $q->fetchAll(); }
+        $q=$this->db->prepare('SELECT id FROM participants WHERE instance_id=? AND is_active=1 ORDER BY created_at,id'); $q->execute([$id]);
+        $participants=new Participants($this->db);
+        $row['participants']=array_map(fn($pid)=>$participants->get($id,$pid),$q->fetchAll(PDO::FETCH_COLUMN));
         return $row;
     }
     private function transaction(callable $work): mixed
@@ -94,9 +97,9 @@ final class Schedules
             return $this->get($id);
         });
     }
-    public function candidates(string $id, array $data): array
+    public function candidates(string $id, array $data, bool $preview = false): array
     {
-        return $this->transaction(function () use ($id, $data) {
+        return $this->transaction(function () use ($id, $data, $preview) {
             $row = $this->get($id);
             if ($row['status'] !== 'open') throw new Problem('受付中の案件のみ候補帯を編集できます。',409);
             foreach (['version','schema_revision'] as $key) {
@@ -122,13 +125,18 @@ final class Schedules
                     }
                 }
             }
+            $q=$this->db->prepare('SELECT a.slot_id,COUNT(*) AS count FROM answers a JOIN participants p ON p.id=a.participant_id AND p.is_active=1 JOIN day_slots s ON s.id=a.slot_id JOIN instance_days d ON d.id=s.day_id WHERE d.instance_id=? GROUP BY a.slot_id');
+            $q->execute([$id]); $counts=array_column($q->fetchAll(),'count','slot_id'); $affected=0;
+            foreach ($changes as $change) if (!$change['candidate']) $affected+=(int)($counts[$change['slot_id']] ?? 0);
+            if ($preview) return ['changed_cells'=>count($changes),'excluded_cells'=>$removed,'affected_answers'=>$affected,'answers_revision'=>$row['answers_revision'],'answer_counts'=>(object)$counts];
+            if (!is_int($data['expected_answers_revision'] ?? null) || $data['expected_answers_revision']!==$row['answers_revision']) throw new Problem('回答が更新されました。候補帯の影響を再プレビューしてください。',409);
             if ($removed && ($data['confirm_exclusion'] ?? null) !== true) throw new Problem('候補から外れるセルを確認してください。',422);
             if ($changes) {
                 // Update only the mask: slot IDs, UTC bounds and referencing history survive.
                 $q = $this->db->prepare('UPDATE day_slots SET is_candidate=? WHERE id=?');
                 foreach ($changes as $change) $q->execute([(int)$change['candidate'],$change['slot_id']]);
                 $this->db->prepare('UPDATE instances SET schema_revision=schema_revision+1,updated_at=? WHERE id=?')->execute([gmdate('Y-m-d\TH:i:s\Z'),$id]);
-                $this->audit($id,'candidate-mask',['previous_schema_revision'=>$row['schema_revision'],'changes'=>$changes]);
+                $this->audit($id,'candidate-mask',['previous_schema_revision'=>$row['schema_revision'],'answers_revision'=>$row['answers_revision'],'affected_answers'=>$affected,'changes'=>$changes]);
             }
             return $this->get($id);
         });

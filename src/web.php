@@ -75,7 +75,7 @@ function runWeb(): void {
         $rows = $service->listing($deleted);
         if (!$rows) echo '<p>スケジュールはありません。</p>';
         foreach ($rows as $row) {
-            echo '<article><h2>'.($deleted ? h($row['title']) : '<a href="'.url('event.php?id='.$row['id']).'">'.h($row['title']).'</a>').'</h2><p>'.h($row['first_date']).'〜'.h($row['last_date']).'（'.h($row['day_count']).'日） · 状態: '.h($row['status']).' · 更新: '.h(jstTime($row['updated_at'])).'</p>';
+            echo '<article><h2>'.($deleted ? h($row['title']) : '<a href="'.url('event.php?id='.$row['id']).'">'.h($row['title']).'</a>').'</h2><p>'.h($row['first_date']).'〜'.h($row['last_date']).'（'.h($row['day_count']).'日） · 参加者'.h($row['participant_count']).'人／提出済'.h($row['submitted_count']).'人 · 状態: '.h($row['status']).' · 更新: '.h(jstTime($row['updated_at'])).'</p>';
             if ($deleted) { echo '<form method="post" action="'.url('?id='.$row['id'].'&deleted=1').'">'; fields($row); echo '<button name="action" value="restore">復元</button></form>'; }
             else echo '<a href="'.url('event.php?id='.$row['id']).'">開く</a> · <a href="'.url('delete.php?id='.$row['id']).'">削除</a>';
             echo '</article>';
