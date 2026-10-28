@@ -191,6 +191,48 @@ class HTTPTests(unittest.TestCase):
         self.assertEqual(sorted(out.decode() for out,err in results),['201','409'])
         self.assertEqual(len(json.loads(self.request(route)[2])['groups']),9)
 
+    def test_archived_group_form_conflict_keeps_draft(self):
+        _,headers,_=self.request('api/index.php');token=headers['X-CSRF-Token']
+        _,_,body=self.request('api/index.php','POST',{'title':'fallback','dates':['2026-11-02']},token=token)
+        row=json.loads(body);route='api/index.php?route=/instances/'+row['id']
+        _,_,body=self.request(route+'/groups','POST',{'expected_version':1,'expected_schema_revision':1,'name':'original'},token=token)
+        group=json.loads(body)
+        draft={'csrf':token,'action':'edit','group_id':group['id'],'expected_version':'1','expected_schema_revision':'2','expected_group_version':'1','expected_answers_revision':'1','name':'<img src=x onerror=alert(1)>','description':'下書き\n</textarea><script>alert(1)</script>'}
+        archive={'expected_version':1,'expected_schema_revision':2,'expected_group_version':1,'expected_answers_revision':1,'confirmation':'original'}
+        self.assertEqual(self.request(route+'/groups/'+group['id'],'DELETE',archive,token=token)[0],200)
+        for attempt in range(2):
+            # Ordinary HTML form request, with no JavaScript fetch handler.
+            req=urllib.request.Request(self.origin+'/gyugyu/groups.php?id='+row['id'],data=urllib.parse.urlencode(draft).encode(),headers={'Authorization':self.auth,'Origin':self.origin})
+            with self.assertRaises(urllib.error.HTTPError) as error:self.client.open(req)
+            self.assertEqual(error.exception.code,409);page=error.exception.read().decode()
+            self.assertIn('対象グループは現在アーカイブ済みです',page)
+            snapshot=re.search(r'<section id="group-failed-draft">(.*?)</section>',page,re.S).group(1)
+            self.assertIn('&lt;img src=x onerror=alert(1)&gt;',snapshot)
+            self.assertIn('下書き\n&lt;/textarea&gt;&lt;script&gt;alert(1)&lt;/script&gt;',snapshot)
+            self.assertNotIn('<script>',snapshot);self.assertNotIn('<form',snapshot)
+            for key in ['action','group_id','expected_version','expected_schema_revision','expected_group_version','expected_answers_revision']:
+                self.assertIn('<dt>'+key+'</dt><dd>'+draft[key]+'</dd>',snapshot)
+            current=json.loads(self.request(route)[2]);self.assertEqual(current['groups'],[]);self.assertEqual(current['schema_revision'],3)
+            archived=json.loads(self.request(route+'/groups&archived=1')[2])['groups'][0]
+            self.assertEqual(archived['name'],'original');self.assertEqual(archived['description'],'');self.assertEqual(archived['version'],2)
+        # A lifecycle change can remove every form, even while the group remains active.
+        self.assertEqual(self.request(route+'/groups/'+group['id']+'/restore','POST',dict(archive,expected_schema_revision=3,expected_group_version=2),token=token)[0],200)
+        draft.update(expected_schema_revision='4',expected_group_version='3')
+        import sqlite3
+        with sqlite3.connect(self.env['GYUGYU_DB']) as db:
+            db.execute("UPDATE instances SET status='locked',version=version+1 WHERE id=?",(row['id'],))
+        req=urllib.request.Request(self.origin+'/gyugyu/groups.php?id='+row['id'],data=urllib.parse.urlencode(draft).encode(),headers={'Authorization':self.auth,'Origin':self.origin})
+        with self.assertRaises(urllib.error.HTTPError) as error:self.client.open(req)
+        self.assertEqual(error.exception.code,409);page=error.exception.read().decode()
+        self.assertIn('受付中の案件のみ変更できます',page);self.assertNotIn('<form',page)
+        snapshot=re.search(r'<section id="group-failed-draft">(.*?)</section>',page,re.S).group(1)
+        self.assertIn('&lt;img src=x onerror=alert(1)&gt;',snapshot)
+        self.assertIn('下書き\n&lt;/textarea&gt;&lt;script&gt;alert(1)&lt;/script&gt;',snapshot)
+        for key in ['expected_version','expected_schema_revision','expected_group_version','expected_answers_revision']:
+            self.assertIn('<dt>'+key+'</dt><dd>'+draft[key]+'</dd>',snapshot)
+        current=json.loads(self.request(route)[2]);self.assertEqual(current['status'],'locked');self.assertEqual(current['version'],2)
+        self.assertEqual(current['groups'][0]['name'],'original');self.assertEqual(current['groups'][0]['version'],3)
+
     def test_backup_restore(self):
         fixture = "require " + json.dumps(str(ROOT/'src/bootstrap.php')) + "; $s=new Gyugyu\\Schedules(Gyugyu\\Database::connect()); $r=$s->create(['title'=>'backup fixture','dates'=>['2026-11-05']]);  $p=new Gyugyu\\Participants(Gyugyu\\Database::connect()); $p->submit($r['id'],null,['display_name'=>'backup participant','expected_version'=>1,'expected_schema_revision'=>1,'submission_key'=>str_repeat('a',32),'answers'=>[['slot_id'=>$r['days'][0]['slots'][6]['id'],'state'=>'yes']]]); echo $r['id'];"
         ident=subprocess.check_output([PHP,'-r',fixture],env=self.env).decode()

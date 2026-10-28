@@ -16,7 +16,25 @@ function groupPage(Gyugyu\Schedules $s, string $id, string $method): void {
     }
     $row=$s->get($id); headerPage('グループ管理');
     echo '<p><a href="'.url('event.php?id='.$id).'">案件に戻る</a></p><p>有効グループは0〜9件。削除後も参加者・回答・所属履歴を保持します。</p>';
-    if ($error) echo '<p role="alert">'.h($error).' 入力を控え、最新版を読み直してください。</p>';
+    if ($error) {
+        echo '<p role="alert">'.h($error).' 入力を控え、最新版を読み直してください。</p>';
+        // Keep a non-submitting copy even when the target no longer has an edit form.
+        $archivedIds=array_column($groups->listing($id,true),'id');
+        echo '<section id="group-failed-draft"><h2>保存できなかった下書き</h2>';
+        if (in_array($_POST['group_id'] ?? '',$archivedIds,true)) echo '<p>対象グループは現在アーカイブ済みです。</p>';
+        echo '<p>送信した入力と元の版数です。復元・上書きは行っていません。必要な内容を控えてください。</p><dl>';
+        foreach (['action','group_id','expected_version','expected_schema_revision','expected_group_version','expected_answers_revision'] as $key) {
+            $value=$_POST[$key] ?? '';
+            echo '<dt>'.h($key).'</dt><dd>'.h(is_string($value)?$value:json_encode($value,JSON_UNESCAPED_UNICODE)).'</dd>';
+        }
+        echo '</dl>';
+        foreach (['name'=>'送信したグループ名','description'=>'送信した説明','confirmation'=>'送信した確認名'] as $key=>$label) {
+            if (!array_key_exists($key,$_POST)) continue;
+            $value=$_POST[$key];
+            echo '<label>'.h($label).'<textarea readonly>'.h(is_string($value)?$value:json_encode($value,JSON_UNESCAPED_UNICODE)).'</textarea></label>';
+        }
+        echo '</section>';
+    }
     $form=function(?array $g,string $action) use($row,$error) {
         $failed=$error && ($_POST['group_id'] ?? '')===($g['id'] ?? '') && ($_POST['action'] ?? '')===$action;
         $v=$failed?$_POST:array_merge($g ?? [],['expected_version'=>$row['version'],'expected_schema_revision'=>$row['schema_revision'],'expected_answers_revision'=>$row['answers_revision'],'expected_group_version'=>$g['version'] ?? 0]);
