@@ -29,12 +29,33 @@ test('ranking follows fewer no, then more yes; ties ignore unknown and use time 
  assert.throws(()=>summarize(row,'include',['foreign']));
  row.groups=[{id:'archived',archived_at:'then'}];assert.throws(()=>summarize(row,'include',['archived']));
 });
-test('score ordering agrees with independent lexicographic no/yes ordering through N=6',()=>{
- for(let N=1;N<=6;N++){
-  const cases=[];for(let X=0;X<=N;X++)for(let Y=0;Y<=N-X;Y++)cases.push({X,Y,score:Y-(N+1)*X});
-  for(const a of cases)for(const b of cases){
-   const reference=Math.sign(b.X-a.X)||Math.sign(a.Y-b.Y);
-   assert.equal(Math.sign(a.score-b.score),reference);
+test('PHP/JS rank multiple slots by independent no/yes ordering, with every T/U tie through N=6',()=>{
+ const cases=[];
+ for(let N=0;N<=6;N++){
+  const combinations=[];
+  for(let X=0;X<=N;X++)for(let Y=0;Y<=N-X;Y++)for(let T=0;T<=N-X-Y;T++)combinations.push({X,Y,T,U:N-X-Y-T});
+  // Reverse the generation order so accidental insertion-order ranking cannot pass.
+  combinations.reverse();
+  const slots=combinations.map((counts,i)=>({id:'s'+i,starts_at_utc:new Date(Date.UTC(2026,10,2,0,i*30)).toISOString(),is_candidate:1}));
+  const outside={id:'outside',starts_at_utc:'2026-11-01T00:00:00.000Z',is_candidate:0};
+  const row={groups:[{id:'a'}],days:[{id:'day',slots:[outside,...slots]}],participants:Array.from({length:N},(_,person)=>({id:'p'+person,display_name:'p'+person,is_active:1,group_ids:[],answers:[{slot_id:'outside',state:'yes'},...combinations.flatMap((c,i)=>{
+   const state=person<c.Y?'yes':person<c.Y+c.X?'no':person<c.Y+c.X+c.T?'maybe':null;
+   return state?[{slot_id:slots[i].id,state}]:[];
+  })]}))};
+  const reference=N?combinations.map((counts,i)=>({...counts,id:slots[i].id,time:slots[i].starts_at_utc})).sort((a,b)=>a.X-b.X||b.Y-a.Y||a.time.localeCompare(b.time)).map(s=>s.id):[];
+  for(const mode of ['all','include']){
+   const actual=summarize(row,mode,[]),expected=mode==='all'?reference:[];
+   assert.deepEqual(actual.ranking,expected);
+   assert.equal(actual.slots[0].score,null);assert.equal(actual.slots[0].all_yes,false);
+   if(mode==='include'||N===0)for(const slot of actual.slots){assert.equal(slot.score,null);assert.equal(slot.all_yes,false);}
+   // Slots sharing X/Y remain tied even when T/U and provisional state differ.
+   for(let i=0;i<combinations.length;i++)for(let j=i+1;j<combinations.length;j++){
+    if(combinations[i].X===combinations[j].X&&combinations[i].Y===combinations[j].Y)assert.equal(actual.slots[i+1].score,actual.slots[j+1].score);
+   }
+   cases.push({row,mode,selected:[],result:actual});
   }
  }
+ const php=JSON.parse(execFileSync(process.env.PHP_BINARY||'php',['tests/summary_bridge.php'],{input:JSON.stringify(cases),maxBuffer:16*1024*1024}));
+ // JS is already checked against the independent reference; PHP must match both rankings and slot data.
+ assert.deepEqual(php,cases.map(c=>c.result));
 });
