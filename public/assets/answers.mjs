@@ -9,6 +9,7 @@ export function submission(values,slots) {
 }
 function initialize(root) {
     const $=id=>root.querySelector('#'+id), panels=[...root.querySelectorAll('.day-panel')];
+    if(!panels.length)return;
     const metadata=document.querySelector('#metadata-editor');
     let slots={},active=null,draft=null,groupsBefore=[],nameBefore='',saving=false,stroke=null,inspected=null;
     let version=Number(root.dataset.version),revision=Number(root.dataset.revision);

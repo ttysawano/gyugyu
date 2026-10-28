@@ -2,7 +2,7 @@
 
 PHP + SQLiteによる、共通Basic認証下のスケジュール調整アプリです。開発仕様の正本は [docs/SPEC.md](docs/SPEC.md) です。
 
-実装済み：複数案件の一覧・作成・プレビュー・詳細、調整名／説明編集、確認付き論理削除・復元、版数競合検知、監査ログ。日別候補グリッドと候補帯編集も実装済みです。参加者登録・共有回答編集・確認付き非表示化・参加者数／提出済人数も実装済みです。グループ管理・複数所属・参加者表示フィルターも実装済みです。○△×3行集計・未入力人数・暫定順位・表示モードも実装済みです。CSV（ワイド／ロング／集計）・完全JSONエクスポートも実装済みです。受付状態の変更UI/APIは後続です。
+実装済み：複数案件の一覧・作成・プレビュー・詳細、調整名／説明編集、確認付き論理削除・復元、版数競合検知、監査ログ。日別候補グリッドと候補帯編集も実装済みです。参加者登録・共有回答編集・確認付き非表示化・参加者数／提出済人数も実装済みです。グループ管理・複数所属・参加者表示フィルターも実装済みです。○△×3行集計・未入力人数・暫定順位・表示モードも実装済みです。CSV（ワイド／ロング／集計）・完全JSONエクスポートも実装済みです。候補日の追加・確認付きアーカイブ・同日履歴復元も実装済みです。受付状態の変更UI/APIは後続です。
 
 ## 必要環境と初期化
 
@@ -136,7 +136,7 @@ APIは `/instances/{id}/groups` のGET/POST、`/groups/{group_id}` のPATCH/DELE
 
 GET `/instances/{id}/summary?mode=all|include|exclude&group_ids[]=...`（実際には既存の`route`クエリに続けて`&mode=...`）で同じ計算結果と版数を取得できます。同案件の有効グループ以外を拒否し、1つの読取りtransaction内で集計します。HTTP応答はno-storeです。追加試験は `python3 tests/summary_browser.py`。NodeテストはPHPとの1,280ケース照合も含むためテスト時はPHPが必要です。
 
-連続60/90分の候補推奨、日付追加削除、参加者復帰、受付終了・確定のUI/APIは後続です。
+連続60/90分の候補推奨、参加者復帰、受付終了・確定のUI/APIは後続です。
 
 ## CSV／JSONエクスポート
 
@@ -151,3 +151,17 @@ API例：`api/index.php?route=/instances/{id}/export&format=long&scope=mask&mode
 - UTCは`Z`、JSTは`+09:00`、timezoneはAsia/Tokyo。ファイル名はASCIIの案件ID・UTC生成日時・scope・formatのみで、入力名は使用しません。Basic認証・no-store・nosniffを適用し、deleted案件は404、locked/confirmedは読取り出力できます。未対応queryや別案件/archived group IDは422です。
 
 完全JSONのschemaは`format_version:1, generated_at, scope, unknown_representation, instance, days, groups, participants`。各dayにslots、各participantに全所属group_idsとanswersを持ち、履歴状態はarchived_at/is_activeで識別します。これはimport機能やSQLite物理バックアップの代替ではありません。追加試験：`python3 tests/export_browser.py`。
+
+
+## 非阻害の将来QAメモ
+
+PR #6の独立レビューから継続する確認項目（今回の日付管理では機能拡張しない）：exportのexclude／OR／0グループ条件、候補0件／翌日帯の出力、locked画面でのダウンロード、HTTPエラー／タイムアウトからの回復、ExportでのSummary重複計算の規模拡大時の性能。
+
+
+## 候補日の管理
+
+詳細の「候補日を追加・復元・アーカイブ」から1日ずつ操作します。新規だけ初期時間帯を指定し、同日の再追加は以前のID・候補帯・全回答を復元します。有効日付の重複は変更しません。アーカイブは全保存回答数と表示対象回答数を確認し、対象日を再入力して確定します。
+
+**上限はアーカイブ済みを含む累計366日／案件**です。繰返し作成・アーカイブによる無制限な増大を防ぎます。同日の復元は上限でも可能です。最後の日をアーカイブして0件になっても、参加者一覧・集計対象人数・出力・追加復元導線を保持します。参加者回答グリッド編集は日付の追加・復元後に再開します。
+
+保存・プレビューのAPI契約はSPEC第24節を参照してください。複数日batchは受け付けず全体を拒否します。競合・通信失敗では下書きと元の版数を維持し、保存結果不明の場合は別画面で確認してください。日付変更にはJavaScriptが必要です。追加migrationは不要、既存SQLiteバックアップに日付履歴も含まれます。追加の実ブラウザー試験は `python3 tests/day_browser.py`（CIにも含む）です。

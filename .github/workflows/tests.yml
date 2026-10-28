@@ -27,4 +27,5 @@ jobs:
           /tmp/gyugyu-test-venv/bin/python tests/group_browser.py
           /tmp/gyugyu-test-venv/bin/python tests/summary_browser.py
           /tmp/gyugyu-test-venv/bin/python tests/export_browser.py
+          /tmp/gyugyu-test-venv/bin/python tests/day_browser.py
       - run: git diff --check
