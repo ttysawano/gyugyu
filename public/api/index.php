@@ -8,8 +8,8 @@ try {
     Security::authorize(); Security::session();
     $service = new Schedules(Database::connect());
     $route = $_GET['route'] ?? '/instances';
-    if (!is_string($route) || !preg_match('~^/instances(?:/([a-f0-9]{32})(/restore)?)?$~D',$route,$m)) throw new Problem('見つかりません。',404);
-    $method = $_SERVER['REQUEST_METHOD']; $id = $m[1] ?? null; $restore = isset($m[2]);
+    if (!is_string($route) || !preg_match('~^/instances(?:/([a-f0-9]{32})(/restore|/candidate-slots/bulk)?)?$~D',$route,$m)) throw new Problem('見つかりません。',404);
+    $method = $_SERVER['REQUEST_METHOD']; $id = $m[1] ?? null; $operation = $m[2] ?? ''; $restore = $operation === '/restore'; $bulk = $operation === '/candidate-slots/bulk';
     $data = [];
     if ($method !== 'GET') {
         if (!str_starts_with($_SERVER['CONTENT_TYPE'] ?? '', 'application/json')) throw new Problem('JSONが必要です。',415);
@@ -17,12 +17,13 @@ try {
         if (!is_array($data) || array_is_list($data) && $data !== []) throw new Problem('JSONオブジェクトが必要です。',400);
         Security::mutation($data);
     }
-    if ($method === 'GET' && !$restore) {
+    if ($method === 'GET' && $operation === '') {
         $result = $id ? $service->get($id) : $service->listing(($_GET['deleted'] ?? '') === '1');
         header('X-CSRF-Token: '.$_SESSION['csrf']);
     } elseif ($method === 'POST' && !$id) { $result = $service->create($data); http_response_code(201); }
-    elseif ($method === 'PATCH' && $id && !$restore) $result = $service->change($id,'edit',$data);
-    elseif ($method === 'DELETE' && $id && !$restore) $result = $service->change($id,'delete',$data);
+    elseif ($method === 'PATCH' && $id && $bulk) $result = $service->candidates($id,$data);
+    elseif ($method === 'PATCH' && $id && $operation === '') $result = $service->change($id,'edit',$data);
+    elseif ($method === 'DELETE' && $id && $operation === '') $result = $service->change($id,'delete',$data);
     elseif ($method === 'POST' && $id && $restore) $result = $service->change($id,'restore',$data);
     else throw new Problem('許可されていないメソッドです。',405);
     echo json_encode($result,JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE);

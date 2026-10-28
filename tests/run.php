@@ -55,4 +55,5 @@ foreach (['1900-01-01','2000-02-29','9998-12-31'] as $date) {
     check(count($edge['days'][0]['slots'])===48,'boundary date slots');
 }
 check($db->query("SELECT COUNT(*) FROM audit_log WHERE action='edit'")->fetchColumn()===1,'rejected edits leave no audit entry');
+require __DIR__.'/candidates.php';
 echo "PASS: $count assertions\n";

@@ -94,6 +94,45 @@ final class Schedules
             return $this->get($id);
         });
     }
+    public function candidates(string $id, array $data): array
+    {
+        return $this->transaction(function () use ($id, $data) {
+            $row = $this->get($id);
+            if ($row['status'] !== 'open') throw new Problem('受付中の案件のみ候補帯を編集できます。',409);
+            foreach (['version','schema_revision'] as $key) {
+                if (!is_int($data['expected_'.$key] ?? null) || $data['expected_'.$key] !== $row[$key]) {
+                    throw new Problem('案件または候補帯が更新されました。下書きを控え、最新版と比較してください。',409);
+                }
+            }
+            $masks = $data['masks'] ?? null;
+            if (!is_array($masks) || !array_is_list($masks) || count($masks) < 1 || count($masks) > count($row['days'])) throw new Problem('対象日のマスクが不正です。',422);
+            $days = array_column($row['days'],null,'id'); $seen = []; $changes = []; $removed = 0;
+            foreach ($masks as $mask) {
+                if (!is_array($mask) || !is_string($mask['day_id'] ?? null)) throw new Problem('対象日が不正です。',422);
+                $dayId = $mask['day_id']; $values = $mask['candidates'] ?? null;
+                if (!isset($days[$dayId]) || isset($seen[$dayId]) || $days[$dayId]['archived_at'] !== null) throw new Problem('対象日が不正です。',422);
+                $seen[$dayId] = true;
+                if (!is_array($values) || !array_is_list($values) || count($values) !== 48) throw new Problem('各日の候補マスクは48個の真偽値で指定してください。',422);
+                foreach ($values as $i => $value) {
+                    if (!is_bool($value)) throw new Problem('候補マスクは真偽値で指定してください。',422);
+                    $slot = $days[$dayId]['slots'][$i];
+                    if ((bool)$slot['is_candidate'] !== $value) {
+                        $changes[] = ['slot_id'=>$slot['id'],'candidate'=>$value];
+                        if (!$value) $removed++;
+                    }
+                }
+            }
+            if ($removed && ($data['confirm_exclusion'] ?? null) !== true) throw new Problem('候補から外れるセルを確認してください。',422);
+            if ($changes) {
+                // Update only the mask: slot IDs, UTC bounds and referencing history survive.
+                $q = $this->db->prepare('UPDATE day_slots SET is_candidate=? WHERE id=?');
+                foreach ($changes as $change) $q->execute([(int)$change['candidate'],$change['slot_id']]);
+                $this->db->prepare('UPDATE instances SET schema_revision=schema_revision+1,updated_at=? WHERE id=?')->execute([gmdate('Y-m-d\TH:i:s\Z'),$id]);
+                $this->audit($id,'candidate-mask',['previous_schema_revision'=>$row['schema_revision'],'changes'=>$changes]);
+            }
+            return $this->get($id);
+        });
+    }
     public function change(string $id, string $action, array $data): array
     {
         return $this->transaction(function () use ($id,$action,$data) {
