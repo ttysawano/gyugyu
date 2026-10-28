@@ -158,6 +158,21 @@ final class Schedules
             return $this->get($id);
         });
     }
+    public function reception(string $id,array $data): array
+    {
+        foreach (array_keys($data) as $key) if (!in_array($key,['action','confirmation','expected_version','expected_schema_revision','expected_answers_revision'],true)) throw new Problem('受付状態の変更に使えない入力です。',422);
+        return $this->transaction(function () use ($id,$data) {
+            $row=$this->get($id);$action=$data['action'] ?? null;
+            if (!in_array($action,['lock','reopen'],true)) throw new Problem('受付終了または再開を指定してください。',422);
+            if ($row['status']!==($action==='lock'?'open':'locked')) throw new Problem('受付状態が変わりました。最新版を確認してください。',409);
+            foreach (['version','schema_revision','answers_revision'] as $key) if (!is_int($data['expected_'.$key] ?? null)||$data['expected_'.$key]!==$row[$key]) throw new Problem('案件・候補・参加者・回答が更新されました。受付変更の内容を再確認してください。',409);
+            if (($data['confirmation'] ?? null)!==$row['title']) throw new Problem('確認のため案件名を正確に入力してください。',422);
+            $status=$action==='lock'?'locked':'open';
+            $this->db->prepare('UPDATE instances SET status=?,version=version+1,updated_at=? WHERE id=?')->execute([$status,gmdate('Y-m-d\TH:i:s\Z'),$id]);
+            $this->audit($id,'reception-'.$action,['previous_status'=>$row['status'],'status'=>$status,'previous_version'=>$row['version'],'schema_revision'=>$row['schema_revision'],'answers_revision'=>$row['answers_revision']]);
+            return $this->get($id);
+        });
+    }
     public function change(string $id, string $action, array $data): array
     {
         return $this->transaction(function () use ($id,$action,$data) {

@@ -1,0 +1,2 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {receptionPayload} from '../public/assets/reception.mjs';
+test('reception keeps intended action and all original revisions on retry',()=>{const snapshot={action:'lock',expected_version:1,expected_schema_revision:2,expected_answers_revision:3};assert.deepEqual(receptionPayload(snapshot,'案件'),{...snapshot,confirmation:'案件'});assert.equal(snapshot.action,'lock');assert.equal(receptionPayload(snapshot,'案件').expected_version,1);});
