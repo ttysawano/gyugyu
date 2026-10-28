@@ -25,7 +25,7 @@ final class Schedules
         if (!is_array($dates) || count($dates) < 1 || count($dates) > 366) throw new Problem('候補日は1〜366行で指定してください。', 422);
         $unique = [];
         foreach ($dates as $date) {
-            if (!is_string($date)) throw new Problem('候補日が不正です。', 422);
+            if (!is_string($date) || !preg_match('/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/D', trim($date))) throw new Problem('候補日が不正です。', 422);
             $date = trim($date);
             $d = \DateTimeImmutable::createFromFormat('!Y-m-d', $date, new \DateTimeZone('Asia/Tokyo'));
             if (!$d || $d->format('Y-m-d') !== $date || $date < '1900-01-01' || $date > '9998-12-31') throw new Problem('候補日は有効なYYYY-MM-DDで入力してください。', 422);

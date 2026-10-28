@@ -18,7 +18,7 @@ check(count($a['days']) === 2 && count($a['days'][0]['slots']) === 48, '48 slots
 check(array_sum(array_column($a['days'][0]['slots'],'is_candidate')) === 18, '09-18 mask');
 check($a['days'][0]['slots'][0]['starts_at_utc'] === '2026-11-01T21:00:00Z', 'JST UTC conversion');
 check($a['days'][0]['slots'][47]['ends_at_utc'] === '2026-11-02T21:00:00Z', 'next day boundary');
-foreach ([['title'=>' '],['title'=>str_repeat('あ',141)],['description'=>str_repeat('あ',2001)],['dates'=>['2026-02-30']],['dates'=>[]],['dates'=>[[]]],['initial_window'=>['start'=>'09:15','end'=>'18:00']],['initial_window'=>['start'=>'18:00','end'=>'09:00']],['timezone'=>'UTC']] as $bad) rejects(fn()=>$s->create(array_replace($data,$bad)),422);
+foreach ([['title'=>' '],['title'=>str_repeat('あ',141)],['description'=>str_repeat('あ',2001)],['dates'=>['2026-02-30']],['dates'=>["2026-11-02\0bad"]],['dates'=>['1899-12-31']],['dates'=>['9999-01-01']],['dates'=>['2026-1-02']],['dates'=>array_fill(0,367,'2026-11-02')],['dates'=>[]],['dates'=>[[]]],['initial_window'=>['start'=>'09:15','end'=>'18:00']],['initial_window'=>['start'=>'18:00','end'=>'09:00']],['timezone'=>'UTC']] as $bad) rejects(fn()=>$s->create(array_replace($data,$bad)),422);
 check(count($s->listing())===2, 'invalid creation does not persist');
 $night = $s->create(array_replace($data,['initial_window'=>['start'=>'22:00','end'=>'06:00','end_next_day'=>true]]));
 check(array_sum(array_column($night['days'][0]['slots'],'is_candidate'))===16,'overnight window');
@@ -50,4 +50,9 @@ check($db->query('SELECT COUNT(*) FROM instances')->fetchColumn()===$before,'ato
 $db->exec('DROP TRIGGER fail_slot');
 check($db->query('PRAGMA integrity_check')->fetchColumn()==='ok','integrity');
 check($db->query('PRAGMA foreign_key_check')->fetchAll()===[],'foreign keys');
+foreach (['1900-01-01','2000-02-29','9998-12-31'] as $date) {
+    $edge = $s->create(array_replace($data,['dates'=>[$date]]));
+    check(count($edge['days'][0]['slots'])===48,'boundary date slots');
+}
+check($db->query("SELECT COUNT(*) FROM audit_log WHERE action='edit'")->fetchColumn()===1,'rejected edits leave no audit entry');
 echo "PASS: $count assertions\n";

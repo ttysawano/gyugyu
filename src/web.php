@@ -3,6 +3,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/bootstrap.php';
 use Gyugyu\{Security,Schedules,Database,Problem};
 function h(mixed $s): string { return htmlspecialchars((string)$s, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); }
+function jstTime(string $utc): string { return (new DateTimeImmutable($utc))->setTimezone(new DateTimeZone('Asia/Tokyo'))->format('Y-m-d H:i:s') . ' JST'; }
 function url(string $path = ''): string { return Security::base() . '/' . $path; }
 function fields(?array $row = null): void {
     echo '<input type="hidden" name="csrf" value="'.h($_SESSION['csrf']).'">';
@@ -55,11 +56,11 @@ function runWeb(): void {
         $row = $service->get($id); headerPage($row['title']);
         if ($error) echo '<p role="alert">'.h($error).'</p>';
         if ($page === 'delete.php') {
-            echo '<p>この案件を一覧から隠します。候補データは保持され、削除済み一覧から復元できます。</p><form method="post">'; fields($row);
+            echo '<p>この案件を一覧から隠します。候補データは保持され、削除済み一覧から復元できます。</p><form method="post">'; fields($error ? ['version'=>$_POST['expected_version'] ?? 0] : $row);
             echo '<label>確認のため案件名を再入力<input name="confirmation" required autocomplete="off"></label><button name="action" value="delete">論理削除する</button> <a href="'.url('event.php?id='.$id).'">取消</a></form>';
         } else {
             if ($row['description'] !== '') echo '<div class="description">'.h($row['description']).'</div>';
-            echo '<p>状態: '.h($row['status']).' · 日本時間 · 更新: '.h($row['updated_at']).'</p><h2>候補日と時間帯</h2><ul>';
+            echo '<p>状態: '.h($row['status']).' · 日本時間 · 更新: '.h(jstTime($row['updated_at'])).'</p><h2>候補日と時間帯</h2><ul>';
             foreach ($row['days'] as $day) {
                 $active = array_values(array_filter($day['slots'],fn($s)=>(bool)$s['is_candidate']));
                 $fmt = function(string $utc) use ($day): string { $d = (new DateTimeImmutable($utc))->setTimezone(new DateTimeZone('Asia/Tokyo')); return ($d->format('Y-m-d') !== $day['local_date'] ? '翌日' : '') . $d->format('H:i'); };
@@ -68,7 +69,7 @@ function runWeb(): void {
             echo '</ul><details'.($error?' open':'').'><summary>調整名・説明を編集</summary><form method="post">';
             // Preserve the submitted version after a conflict; never silently retry a stale edit.
             fields($error ? ['version'=>$_POST['expected_version'] ?? 0] : $row); metadata($error ? $_POST : $row);
-            echo '<button name="action" value="edit">保存</button><p>競合時は入力を控え、再読み込みしてから変更内容を確認してください。</p></form></details><p><a href="'.url('delete.php?id='.$id).'">削除</a> · <a href="'.url().'">一覧へ戻る</a></p>';
+            echo '<button name="action" value="edit">保存</button> <a href="'.url('event.php?id='.$id).'">取消</a><p>競合時は入力を控え、再読み込みしてから変更内容を確認してください。</p></form></details><p><a href="'.url('delete.php?id='.$id).'">削除</a> · <a href="'.url().'">一覧へ戻る</a></p>';
         }
     } else {
         $deleted = ($_GET['deleted'] ?? '') === '1'; headerPage($deleted ? '削除済みスケジュール' : 'スケジュール一覧');
@@ -77,7 +78,7 @@ function runWeb(): void {
         $rows = $service->listing($deleted);
         if (!$rows) echo '<p>スケジュールはありません。</p>';
         foreach ($rows as $row) {
-            echo '<article><h2>'.($deleted ? h($row['title']) : '<a href="'.url('event.php?id='.$row['id']).'">'.h($row['title']).'</a>').'</h2><p>'.h($row['first_date']).'〜'.h($row['last_date']).'（'.h($row['day_count']).'日） · 状態: '.h($row['status']).' · 更新: '.h($row['updated_at']).'</p>';
+            echo '<article><h2>'.($deleted ? h($row['title']) : '<a href="'.url('event.php?id='.$row['id']).'">'.h($row['title']).'</a>').'</h2><p>'.h($row['first_date']).'〜'.h($row['last_date']).'（'.h($row['day_count']).'日） · 状態: '.h($row['status']).' · 更新: '.h(jstTime($row['updated_at'])).'</p>';
             if ($deleted) { echo '<form method="post" action="'.url('?id='.$row['id'].'&deleted=1').'">'; fields($row); echo '<button name="action" value="restore">復元</button></form>'; }
             else echo '<a href="'.url('event.php?id='.$row['id']).'">開く</a> · <a href="'.url('delete.php?id='.$row['id']).'">削除</a>';
             echo '</article>';

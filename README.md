@@ -44,7 +44,8 @@ php -S 127.0.0.1:8080 -t public bin/dev-router.php
 php tests/run.php
 python3 tests/http_test.py
 # PHPのコマンド名が異なる場合：PHP_BINARY=/path/to/php python3 tests/http_test.py
-find src public bin tests -name '*.php' -exec php -l {} \;
+# Bash: propagate a syntax error to the command exit status
+while IFS= read -r -d '' file; do php -l "$file" || exit 1; done < <(find src public bin tests -name '*.php' -print0)
 git diff --check
 # 任意：Python Playwright + Chromium導入済みなら実ブラウザー確認
 python3 tests/browser.py

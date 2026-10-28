@@ -1,5 +1,6 @@
 """Real HTTP requests against the local Basic-auth router and production entry points."""
 import base64
+from datetime import datetime, timedelta
 import http.cookiejar
 import json
 import os
@@ -77,6 +78,8 @@ class HTTPTests(unittest.TestCase):
         detail=self.request('event.php?id='+ident)[2]
         self.assertIn('&lt;script&gt;private-detail&lt;/script&gt;\n二行',detail)
         self.assertNotIn('<script>',detail)
+        jst=(datetime.fromisoformat(row['updated_at'])+timedelta(hours=9)).strftime('%Y-%m-%d %H:%M:%S')+' JST'
+        self.assertIn(jst,detail); self.assertIn(jst,portal)
         self.assertIn('/gyugyu/assets/gyugyu.css',detail)
         self.assertEqual(self.request(route,'PATCH',{'expected_version':1,'description':''},token=token)[0],200)
         self.assertEqual(self.request(route,'PATCH',{'expected_version':1,'title':'stale'},token=token)[0],409)
@@ -89,7 +92,7 @@ class HTTPTests(unittest.TestCase):
         self.assertEqual(self.request(route)[0],200)
         self.assertEqual(self.request('api/index.php','PUT',{},token=token)[0],405)
         self.assertEqual(self.request('api/index.php','POST',dict(payload,title=[]),token=token)[0],422)
-        self.assertEqual(self.request('api/index.php','POST',dict(payload,dates=['bad']),token=token)[0],422)
+        self.assertEqual(self.request('api/index.php','POST',dict(payload,dates=['2026-11-02\0bad']),token=token)[0],422)
         # Test form preview and validation, using the same CSRF token.
         form={'csrf':token,'action':'preview','title':'プレビュー','description':'','dates':'2026-11-02\n2026-11-02','start':'22:00','end':'06:00','end_next_day':'1'}
         req=urllib.request.Request(self.origin+'/gyugyu/create.php',data=urllib.parse.urlencode(form).encode(),headers={'Authorization':self.auth,'Origin':self.origin})

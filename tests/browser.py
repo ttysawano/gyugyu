@@ -8,7 +8,8 @@ try:
     with sync_playwright() as p:
         browser=p.chromium.launch(executable_path=os.environ.get('CHROMIUM_BINARY','/usr/bin/chromium'),headless=True,args=['--no-sandbox'])
         # Reuse the test server with an Authorization header; no app-side bypass.
-        page=browser.new_page(extra_http_headers={'Authorization':HTTPTests.auth})
+        context=browser.new_context(extra_http_headers={'Authorization':HTTPTests.auth})
+        page=context.new_page()
         page.goto(HTTPTests.origin+'/gyugyu/')
         page.get_by_role('link',name='＋ 新しいスケジュール調整').click()
         page.get_by_label('スケジュール調整名').fill('ブラウザー検証')
@@ -25,6 +26,45 @@ try:
         page.get_by_role('button',name='保存',exact=True).click()
         expect(page.get_by_role('heading',name='変更済み',exact=True)).to_be_visible()
         assert page.locator('.description').count()==0
+        detail_url = page.url
+        # Cancel discards an unsaved draft; reloading after POST does not repeat it.
+        page.get_by_text('調整名・説明を編集',exact=True).click()
+        page.get_by_label('スケジュール調整名').fill('取消される下書き')
+        page.get_by_role('link',name='取消',exact=True).click()
+        page.reload()
+        expect(page.get_by_role('heading',name='変更済み',exact=True)).to_be_visible()
+        assert 'JST' in page.content()
+        # Two tabs edit the same version; repeated stale saves remain conflicts.
+        other = page.context.new_page()
+        other.goto(detail_url)
+        other.get_by_text('調整名・説明を編集',exact=True).click()
+        page.get_by_text('調整名・説明を編集',exact=True).click()
+        page.get_by_label('説明（任意・複数行）').fill('先に保存')
+        page.get_by_role('button',name='保存',exact=True).click()
+        other.get_by_label('説明（任意・複数行）').fill('競合下書き')
+        for _ in range(2):
+            other.get_by_role('button',name='保存',exact=True).click()
+            expect(other.get_by_role('alert')).to_be_visible()
+            expect(other.get_by_label('説明（任意・複数行）')).to_have_value('競合下書き')
+        other.close()
+        # Aborted request leaves the saved document unchanged.
+        page.get_by_text('調整名・説明を編集',exact=True).click()
+        page.get_by_label('説明（任意・複数行）').fill('通信中断')
+        page.route('**/event.php?*', lambda route: route.abort() if route.request.method == 'POST' else route.continue_())
+        page.get_by_role('button',name='保存',exact=True).click()
+        page.unroute('**/event.php?*')
+        page.goto(detail_url)
+        expect(page.locator('.description')).to_have_text('先に保存')
+        other = context.new_page()
+        other.goto(detail_url.replace('event.php','delete.php'))
+        page.get_by_text('調整名・説明を編集',exact=True).click()
+        page.get_by_label('説明（任意・複数行）').fill('削除競合前の更新')
+        page.get_by_role('button',name='保存',exact=True).click()
+        for _ in range(2):
+            other.get_by_label('確認のため案件名を再入力').fill('変更済み')
+            other.get_by_role('button',name='論理削除する').click()
+            expect(other.get_by_role('alert')).to_be_visible()
+        other.close()
         page.get_by_role('link',name='一覧へ戻る').click()
         assert '詳細のみの説明' not in page.content()
         page.get_by_role('link',name='削除',exact=True).click()
