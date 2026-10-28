@@ -16,7 +16,8 @@ try:
         page.goto(detail);expect(page.locator('#group-filter')).to_be_hidden()
         page.locator('#group-manage').click()
         def create(name):
-            f=page.locator('form[data-action=create]');f.locator('[name=name]').fill(name);f.locator('button:not([type=reset])').click();expect(f.locator('[name=name]')).to_have_value('')
+            page.wait_for_load_state('load')
+            f=page.locator('form[data-action=create]');f.locator('[name=name]').fill(name);f.locator('button:not([type=reset])').click();expect(f.locator('[name=name]')).to_have_value('');page.wait_for_load_state('load')
         create('constructor');create('<img src=x onerror=alert(1)>');groups=stored()['groups'];a,b=groups
         assert len(groups)==2
         # Keep form contents and versions on transport failure; result loss retries conflict.

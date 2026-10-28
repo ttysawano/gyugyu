@@ -233,6 +233,39 @@ class HTTPTests(unittest.TestCase):
         current=json.loads(self.request(route)[2]);self.assertEqual(current['status'],'locked');self.assertEqual(current['version'],2)
         self.assertEqual(current['groups'][0]['name'],'original');self.assertEqual(current['groups'][0]['version'],3)
 
+    def test_summary_snapshot(self):
+        _,h,_=self.request('api/index.php');token=h['X-CSRF-Token']
+        _,_,body=self.request('api/index.php','POST',{'title':'summary','dates':['2026-11-02','2026-11-03']},token=token);row=json.loads(body);route='api/index.php?route=/instances/'+row['id']
+        _,_,body=self.request(route+'/groups','POST',{'expected_version':1,'expected_schema_revision':1,'name':'team'},token=token);group=json.loads(body)['id']
+        people=[]
+        for i,state in enumerate(['yes','no','unknown']):
+            payload={'expected_version':1,'expected_schema_revision':2,'display_name':'person'+str(i),'submission_key':str(i)*32,'group_ids':[group] if i<2 else [],'answers':[] if state=='unknown' else [{'slot_id':row['days'][0]['slots'][6]['id'],'state':state}]}
+            code,_,body=self.request(route+'/participants','POST',payload,token=token);self.assertEqual(code,201);people.append(json.loads(body))
+        before=json.loads(self.request(route)[2]);endpoint=route+'/summary'
+        self.assertEqual(self.request(endpoint,auth=False)[0],401);self.assertEqual(self.request('assets/summary.mjs',auth=False)[0],401)
+        code,headers,body=self.request(endpoint);self.assertEqual(code,200);self.assertIn('no-store',headers['Cache-Control']);summary=json.loads(body)
+        self.assertEqual(summary['N'],3);self.assertEqual(summary['answers_revision'],4)
+        slot=summary['slots'][6];self.assertEqual(slot['counts'],{'yes':1,'maybe':0,'no':1,'unknown':1});self.assertEqual(slot['score'],-3);self.assertTrue(slot['provisional'])
+        self.assertEqual(summary['slots'][0]['score'],None);self.assertNotIn(summary['slots'][0]['id'],summary['ranking'])
+        empty=json.loads(self.request(endpoint+'&mode=include')[2]);self.assertEqual(empty['N'],0);self.assertEqual(empty['ranking'],[]);self.assertFalse(empty['slots'][6]['all_yes'])
+        selected=json.loads(self.request(endpoint+'&mode=include&group_ids[]='+group+'&group_ids[]='+group)[2]);self.assertEqual(selected['N'],2);self.assertFalse(selected['slots'][6]['provisional'])
+        self.assertEqual(json.loads(self.request(endpoint+'&mode=exclude')[2])['N'],3)
+        self.assertEqual(self.request(endpoint+'&mode=include&group_ids[]=foreign')[0],422)
+        self.assertEqual(self.request(endpoint+'&mode[]=all')[0],422)
+        self.assertEqual(self.request(endpoint,'POST',{},token=token)[0],405)
+        self.assertEqual(self.request(endpoint,'POST',{},token=token,origin='https://evil.example')[0],403)
+        self.assertEqual(json.loads(self.request(route)[2]),before)
+        # Lifecycle states remain fixture-only: read paths exclude archived/inactive data.
+        import sqlite3
+        with sqlite3.connect(self.env['GYUGYU_DB']) as db:
+            db.execute('UPDATE participants SET is_active=0 WHERE id=?',(people[1]['id'],))
+            db.execute("UPDATE instance_days SET archived_at='fixture' WHERE id=?",(row['days'][1]['id'],))
+        latest=json.loads(self.request(endpoint)[2]);self.assertEqual(latest['N'],2);self.assertEqual(len(latest['slots']),48);self.assertEqual(latest['slots'][6]['counts']['unknown'],1)
+        self.assertEqual(self.request('event.php?id='+row['id'])[0],200)
+        self.assertEqual(self.request(route+'/groups/'+group,'DELETE',{'expected_version':1,'expected_schema_revision':2,'expected_group_version':1,'expected_answers_revision':4,'confirmation':'team'},token=token)[0],200)
+        self.assertEqual(self.request(endpoint+'&mode=include&group_ids[]='+group)[0],422)
+        self.assertEqual(json.loads(self.request(endpoint+'&mode=include')[2])['N'],2)
+
     def test_backup_restore(self):
         fixture = "require " + json.dumps(str(ROOT/'src/bootstrap.php')) + "; $s=new Gyugyu\\Schedules(Gyugyu\\Database::connect()); $r=$s->create(['title'=>'backup fixture','dates'=>['2026-11-05']]);  $p=new Gyugyu\\Participants(Gyugyu\\Database::connect()); $p->submit($r['id'],null,['display_name'=>'backup participant','expected_version'=>1,'expected_schema_revision'=>1,'submission_key'=>str_repeat('a',32),'answers'=>[['slot_id'=>$r['days'][0]['slots'][6]['id'],'state'=>'yes']]]); echo $r['id'];"
         ident=subprocess.check_output([PHP,'-r',fixture],env=self.env).decode()

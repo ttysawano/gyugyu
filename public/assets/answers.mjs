@@ -64,7 +64,7 @@ function initialize(root) {
                 const td=document.createElement('td'),cell=document.createElement('button'); cell.type='button'; cell.className='answer-cell';
                 Object.assign(cell.dataset,{slot:slot.id,state:'unknown',label:slot.label}); td.append(cell); row.append(td);
             }
-            panel.querySelector('tbody').append(row);
+            panel.querySelector('tbody').insertBefore(row,panel.querySelector('.summary-row'));
         }
     }
     function begin(id) {

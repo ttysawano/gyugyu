@@ -149,7 +149,7 @@ try:
         scroll=page.locator('.day-scroll').nth(0)
         scroll.evaluate('(el)=>el.scrollLeft=450')
         assert scroll.evaluate('(el)=>el.scrollLeft')>0
-        assert abs(grids.nth(0).locator('tbody th').bounding_box()['x']-scroll.bounding_box()['x'])<1
+        assert abs(grids.nth(0).locator('tbody th').first.bounding_box()['x']-scroll.bounding_box()['x'])<1
         assert cells.nth(0).bounding_box()['width']==16
         assert not errors, errors
         page.screenshot(path='/tmp/gyugyu-candidate-mobile.png',full_page=True)
