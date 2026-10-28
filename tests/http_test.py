@@ -303,6 +303,61 @@ class HTTPTests(unittest.TestCase):
         self.assertEqual(self.request(route,'DELETE',{'expected_version':1,'confirmation':'v59'},token=token)[0],200)
         self.assertEqual(self.request(endpoint)[0],404)
 
+    def test_date_management(self):
+        _,h,_=self.request('api/index.php');token=h['X-CSRF-Token']
+        _,_,body=self.request('api/index.php','POST',{'title':'days','dates':['2026-11-03']},token=token);row=json.loads(body);ident=row['id'];route='api/index.php?route=/instances/'+ident;endpoint=route+'/days';day=row['days'][0]
+        for path in [endpoint,'days.php?id='+ident,'assets/days.mjs']:self.assertEqual(self.request(path,auth=False)[0],401)
+        self.assertEqual(self.request('days.php?id='+ident)[0],200)
+        req={'action':'archive','day_id':day['id'],'expected_version':1,'expected_schema_revision':1}
+        for t,o in [(None,True),(token,False),(token,'https://evil.example')]:self.assertEqual(self.request(endpoint+'/preview','POST',req,token=t,origin=o)[0],403)
+        _,_,body=self.request(endpoint+'/preview','POST',req,token=token);plan=json.loads(body)
+        commit=dict(req,confirmed_operation='archive',expected_answers_revision=plan['answers_revision'],expected_answer_count=plan['answer_count'],expected_visible_answers=plan['visible_answers'],confirmation=day['local_date'])
+        _,_,body=self.request(route+'/participants','POST',{'expected_version':1,'expected_schema_revision':1,'submission_key':'a'*32,'display_name':'回答','answers':[{'slot_id':day['slots'][6]['id'],'state':'yes'}]},token=token);person=json.loads(body)
+        self.assertEqual(self.request(endpoint,'DELETE',commit,token=token)[0],409)
+        _,_,body=self.request(endpoint+'/preview','POST',req,token=token);plan=json.loads(body);commit.update(expected_answers_revision=plan['answers_revision'],expected_answer_count=plan['answer_count'],expected_visible_answers=plan['visible_answers'])
+        self.assertEqual(plan['answer_count'],1);self.assertEqual(self.request(endpoint,'DELETE',commit,token=token)[0],200)
+        self.assertEqual(self.request(endpoint,'DELETE',commit,token=token)[0],409)
+        self.assertEqual(json.loads(self.request(route)[2])['days'],[]);self.assertEqual(self.request('event.php?id='+ident)[0],200)
+        complete=json.loads(self.request(route+'/export')[2]);self.assertIsNotNone(complete['days'][0]['archived_at']);self.assertEqual(complete['participants'][0]['answers'][0]['slot_id'],day['slots'][6]['id'])
+        req={'action':'add','local_date':'2026-11-03','initial_window':{'start':'22:00','end':'06:00','end_next_day':True},'expected_version':1,'expected_schema_revision':2}
+        _,_,body=self.request(endpoint+'/preview','POST',req,token=token);plan=json.loads(body);self.assertEqual(plan['operation'],'restore')
+        data=dict(req,confirmed_operation='restore',expected_answers_revision=plan['answers_revision'],expected_answer_count=plan['answer_count'],expected_visible_answers=plan['visible_answers'])
+        self.assertEqual(self.request(endpoint,'POST',data,token=token)[0],200)
+        restored=json.loads(self.request(route)[2]);self.assertEqual(restored['days'][0],day);self.assertEqual(restored['participants'][0]['answers'],person['answers'])
+        code,_,body=self.request(endpoint+'/preview','POST',dict(req,expected_schema_revision=3),token=token);self.assertEqual(code,200);self.assertEqual(json.loads(body)['operation'],'existing')
+        self.assertEqual(self.request(endpoint+'/preview','POST',dict(req,local_date='2026-02-30',expected_schema_revision=3),token=token)[0],422)
+        _,_,other=self.request('api/index.php','POST',{'title':'foreign','dates':['2026-11-03']},token=token)
+        self.assertEqual(self.request(endpoint+'/preview','POST',{'action':'archive','day_id':json.loads(other)['days'][0]['id'],'expected_version':1,'expected_schema_revision':3},token=token)[0],404)
+        import sqlite3
+        with sqlite3.connect(self.env['GYUGYU_DB']) as db:db.execute("UPDATE instances SET status='locked' WHERE id=?",(ident,))
+        self.assertEqual(self.request(endpoint+'/preview','POST',dict(req,local_date='2026-11-04',expected_schema_revision=3),token=token)[0],409)
+        with sqlite3.connect(self.env['GYUGYU_DB']) as db:db.execute("UPDATE instances SET status='deleted',deleted_at='fixture' WHERE id=?",(ident,))
+        self.assertEqual(self.request(endpoint)[0],404);self.assertEqual(self.request('days.php?id='+ident)[0],404)
+
+    def test_date_lifetime_cap_race(self):
+        _,h,_=self.request('api/index.php');token=h['X-CSRF-Token']
+        dates=[(datetime(2028,1,1)+timedelta(days=i)).strftime('%Y-%m-%d') for i in range(365)]
+        status,_,body=self.request('api/index.php','POST',{'title':'date cap race','dates':dates},token=token)
+        self.assertEqual(status,201);row=json.loads(body);route='api/index.php?route=/instances/'+row['id']
+        requests=[]
+        for date in ['2030-01-01','2030-01-02']:
+            req={'local_date':date,'expected_version':1,'expected_schema_revision':1}
+            status,_,body=self.request(route+'/days/preview','POST',req,token=token);self.assertEqual(status,200);plan=json.loads(body)
+            requests.append(dict(req,confirmed_operation='new',expected_answers_revision=plan['answers_revision'],expected_answer_count=0,expected_visible_answers=0))
+        # Independent PHP processes contend for the same SQLite writer lock.
+        worker='require '+json.dumps(str(ROOT/'src/bootstrap.php'))+r'; try {(new Gyugyu\Days(Gyugyu\Database::connect()))->change($argv[1],"add",json_decode($argv[2],true));echo 200;}catch(Gyugyu\Problem $e){echo $e->getCode();}'
+        workers=[subprocess.Popen([PHP,'-r',worker,row['id'],json.dumps(req)],env=self.env,stdout=subprocess.PIPE,stderr=subprocess.PIPE) for req in requests]
+        outcomes=[]
+        for proc in workers:
+            out,err=proc.communicate(timeout=20);self.assertEqual(proc.returncode,0,err);outcomes.append(int(out))
+        self.assertEqual(sorted(outcomes),[200,409])
+        listing=json.loads(self.request(route+'/days')[2]);self.assertEqual(len(listing['days']),366)
+        req={'local_date':'2030-01-03','expected_version':1,'expected_schema_revision':listing['schema_revision']}
+        self.assertEqual(self.request(route+'/days/preview','POST',req,token=token)[0],422)
+        mixed=dict(req,dates=[dates[0],'2030-01-03'])
+        self.assertEqual(self.request(route+'/days','POST',mixed,token=token)[0],422)
+        self.assertEqual(json.loads(self.request(route+'/days')[2]),listing)
+
     def test_backup_restore(self):
         fixture = "require " + json.dumps(str(ROOT/'src/bootstrap.php')) + "; $s=new Gyugyu\\Schedules(Gyugyu\\Database::connect()); $r=$s->create(['title'=>'backup fixture','dates'=>['2026-11-05']]);  $p=new Gyugyu\\Participants(Gyugyu\\Database::connect()); $p->submit($r['id'],null,['display_name'=>'backup participant','expected_version'=>1,'expected_schema_revision'=>1,'submission_key'=>str_repeat('a',32),'answers'=>[['slot_id'=>$r['days'][0]['slots'][6]['id'],'state'=>'yes']]]); echo $r['id'];"
         ident=subprocess.check_output([PHP,'-r',fixture],env=self.env).decode()

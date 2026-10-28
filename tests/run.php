@@ -59,4 +59,5 @@ require __DIR__.'/candidates.php';
 require __DIR__.'/participants.php';
 require __DIR__.'/groups.php';
 require __DIR__.'/exports.php';
+require __DIR__.'/days.php';
 echo "PASS: $count assertions\n";

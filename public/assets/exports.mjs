@@ -9,7 +9,7 @@ function initialize(root){
     const $=id=>root.querySelector('#'+id),metadata=document.querySelector('#metadata-editor');let downloading=false;
     const busy=()=>!!root.dataset.answerEditing||!!root.dataset.candidateEditing||!!metadata?.open;
     const status=text=>$('export-status').textContent=text;
-    function render(){ $('export-controls').disabled=busy()||downloading;$('export-scope').disabled=$('export-format').value==='json'; }
+    function render(){ if(metadata)metadata.hidden=downloading||!!root.dataset.answerEditing||!!root.dataset.candidateEditing; $('export-controls').disabled=busy()||downloading;$('export-scope').disabled=$('export-format').value==='json'; }
     $('export-download').hidden=false;$('export-format').addEventListener('change',render);
     for(const event of ['answer-mode','candidate-mode','participants-rendered'])root.addEventListener(event,render);metadata?.addEventListener('toggle',render);
     $('export-download').addEventListener('click',async()=>{
