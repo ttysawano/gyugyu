@@ -36,7 +36,7 @@ try:
   page.locator('#restore-reload').click();second.locator('input').fill('constructor');second.locator('[type=submit]').focus();page.keyboard.press('Enter');expect(page.locator('#restore-status')).to_contain_text('復帰しました')
   page.goto(detail);expect(page.locator('.participant-row')).to_have_count(2)
   for person in people:expect(page.locator('[data-participant="'+person['id']+'"] .participant-edit')).to_contain_text('#'+person['id'][:6])
-  assert saved()['participants'][1]['submitted_at']==people[1]['submitted_at']
+  assert next(person for person in saved()['participants'] if person['id']==people[1]['id'])['submitted_at']==people[1]['submitted_at']
   request('/participants/'+people[1]['id'],'PATCH',dict(rev(),expected_participant_version=3,confirmation='constructor',is_active=False))
   req=dict(rev(),action='archive',day_id=row['days'][0]['id']);preview=request('/days/preview','POST',req)
   request('/days','DELETE',dict(req,confirmed_operation='archive',confirmation='2026-11-03',expected_answers_revision=preview['answers_revision'],expected_answer_count=preview['answer_count'],expected_visible_answers=preview['visible_answers']))
