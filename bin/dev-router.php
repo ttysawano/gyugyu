@@ -17,7 +17,7 @@ $allowed = ['index.php','create.php','event.php','delete.php','api/index.php'];
 if (in_array($relative,$allowed,true)) {
     $_SERVER['SCRIPT_NAME'] = $base.'/'.$relative;
     require dirname(__DIR__).'/public/'.$relative;
-} elseif (in_array($relative,['assets/gyugyu.css','assets/gyugyu-cow.svg'],true)) {
-    header('Content-Type: '.(str_ends_with($relative,'.css')?'text/css':'image/svg+xml'));
+} elseif (in_array($relative,['assets/gyugyu.css','assets/gyugyu-cow.svg','assets/candidates.mjs'],true)) {
+    header('Content-Type: '.(str_ends_with($relative,'.css')?'text/css':(str_ends_with($relative,'.mjs')?'text/javascript':'image/svg+xml')));
     readfile(dirname(__DIR__).'/public/'.$relative);
 } else http_response_code(404);

@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 require_once __DIR__ . '/bootstrap.php';
+require_once __DIR__ . '/grid.php';
 use Gyugyu\{Security,Schedules,Database,Problem};
 function h(mixed $s): string { return htmlspecialchars((string)$s, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); }
 function jstTime(string $utc): string { return (new DateTimeImmutable($utc))->setTimezone(new DateTimeZone('Asia/Tokyo'))->format('Y-m-d H:i:s') . ' JST'; }
@@ -60,13 +61,9 @@ function runWeb(): void {
             echo '<label>確認のため案件名を再入力<input name="confirmation" required autocomplete="off"></label><button name="action" value="delete">論理削除する</button> <a href="'.url('event.php?id='.$id).'">取消</a></form>';
         } else {
             if ($row['description'] !== '') echo '<div class="description">'.h($row['description']).'</div>';
-            echo '<p>状態: '.h($row['status']).' · 日本時間 · 更新: '.h(jstTime($row['updated_at'])).'</p><h2>候補日と時間帯</h2><ul>';
-            foreach ($row['days'] as $day) {
-                $active = array_values(array_filter($day['slots'],fn($s)=>(bool)$s['is_candidate']));
-                $fmt = function(string $utc) use ($day): string { $d = (new DateTimeImmutable($utc))->setTimezone(new DateTimeZone('Asia/Tokyo')); return ($d->format('Y-m-d') !== $day['local_date'] ? '翌日' : '') . $d->format('H:i'); };
-                echo '<li>'.h($day['local_date']).' '.h($fmt($active[0]['starts_at_utc'])).'〜'.h($fmt($active[count($active)-1]['ends_at_utc'])).'</li>';
-            }
-            echo '</ul><details'.($error?' open':'').'><summary>調整名・説明を編集</summary><form method="post">';
+            echo '<p>状態: '.h($row['status']).' · 日本時間 · 更新: '.h(jstTime($row['updated_at'])).'</p>';
+            candidateGrid($row);
+            echo '<details id="metadata-editor"'.($error?' open':'').'><summary>調整名・説明を編集</summary><form method="post">';
             // Preserve the submitted version after a conflict; never silently retry a stale edit.
             fields($error ? ['version'=>$_POST['expected_version'] ?? 0] : $row); metadata($error ? $_POST : $row);
             echo '<button name="action" value="edit">保存</button> <a href="'.url('event.php?id='.$id).'">取消</a><p>競合時は入力を控え、再読み込みしてから変更内容を確認してください。</p></form></details><p><a href="'.url('delete.php?id='.$id).'">削除</a> · <a href="'.url().'">一覧へ戻る</a></p>';

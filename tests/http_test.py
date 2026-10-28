@@ -48,6 +48,9 @@ class HTTPTests(unittest.TestCase):
         cls.server.terminate(); cls.server.wait(timeout=5)
         cls.log.close(); cls.tmp.cleanup()
 
+    def setUp(self):
+        self.client = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
+
     def request(self, path='', method='GET', data=None, auth=True, token=None, origin=True):
         headers = {}
         if auth: headers['Authorization'] = self.auth
@@ -100,6 +103,27 @@ class HTTPTests(unittest.TestCase):
         self.assertIn('重複した日付を1件',page); self.assertIn('翌日06:00',page); self.assertIn('16候補スロット',page)
         for path in ['var/gyugyu.sqlite','src/Schedules.php','database/migrations/001_initial.sql','../AGENTS.md']:
             self.assertEqual(self.request(path)[0],404)
+
+    def test_candidate_masks(self):
+        _,headers,_=self.request('api/index.php'); token=headers['X-CSRF-Token']
+        status,_,body=self.request('api/index.php','POST',{'title':'候補API','dates':['2026-11-02','2026-11-03']},token=token)
+        self.assertEqual(status,201); row=json.loads(body)
+        route='api/index.php?route=/instances/'+row['id']+'/candidate-slots/bulk'
+        values=[bool(slot['is_candidate']) for slot in row['days'][0]['slots']]; values[6]=False
+        payload={'expected_version':1,'expected_schema_revision':1,'confirm_exclusion':True,'masks':[{'day_id':row['days'][0]['id'],'candidates':values}]}
+        self.assertEqual(self.request(route,'PATCH',payload,auth=False,token=token)[0],401)
+        self.assertEqual(self.request(route,'PATCH',payload)[0],403)
+        self.assertEqual(self.request(route,'PATCH',payload,token=token,origin='https://evil.example')[0],403)
+        self.assertEqual(self.request(route,'PATCH',dict(payload,confirm_exclusion=False),token=token)[0],422)
+        status,_,body=self.request(route,'PATCH',payload,token=token)
+        self.assertEqual(status,200); saved=json.loads(body)
+        self.assertEqual(saved['schema_revision'],2); self.assertEqual(saved['version'],1)
+        self.assertEqual(saved['days'][0]['slots'][6]['id'],row['days'][0]['slots'][6]['id'])
+        self.assertEqual(self.request(route,'PATCH',payload,token=token)[0],409)
+        self.assertEqual(self.request(route,'GET')[0],405)
+        self.assertEqual(self.request('assets/candidates.mjs',auth=False)[0],401)
+        status,headers,_=self.request('assets/candidates.mjs')
+        self.assertEqual(status,200); self.assertIn('javascript',headers['Content-Type'])
 
     def test_backup_restore(self):
         fixture = "require " + json.dumps(str(ROOT/'src/bootstrap.php')) + "; $s=new Gyugyu\\Schedules(Gyugyu\\Database::connect()); $r=$s->create(['title'=>'backup fixture','dates'=>['2026-11-05']]); echo $r['id'];"
