@@ -1,0 +1,8 @@
+/var/*
+!/var/.gitkeep
+/config/local.php
+*.sqlite*
+*.db*
+.env
+
+__pycache__/
