@@ -15,6 +15,38 @@ final class Participants
         $q=$this->db->prepare('SELECT g.id FROM participant_groups pg JOIN instance_groups g ON g.id=pg.group_id WHERE pg.participant_id=? AND g.archived_at IS NULL ORDER BY g.sort_index,g.id'); $q->execute([$id]);
         $row['group_ids']=$q->fetchAll(PDO::FETCH_COLUMN); return $row;
     }
+    public function inactive(string $instance): array
+    {
+        $this->db->exec('SAVEPOINT inactive_read');
+        try {
+            $schedule=(new Schedules($this->db))->get($instance);
+            $q=$this->db->prepare('SELECT id,display_name,version,submitted_at,(SELECT COUNT(*) FROM answers a WHERE a.participant_id=p.id) AS answer_count FROM participants p WHERE instance_id=? AND is_active=0 ORDER BY created_at,id');$q->execute([$instance]);$people=$q->fetchAll();
+            $groups=$this->db->prepare('SELECT g.id,g.name,g.archived_at FROM instance_groups g JOIN participant_groups pg ON pg.group_id=g.id WHERE pg.participant_id=? ORDER BY g.sort_index,g.id');
+            foreach ($people as &$person) {$groups->execute([$person['id']]);$person['groups']=$groups->fetchAll();}unset($person);
+            $result=['participants'=>$people,'version'=>$schedule['version'],'schema_revision'=>$schedule['schema_revision'],'answers_revision'=>$schedule['answers_revision'],'status'=>$schedule['status']];
+            $this->db->exec('RELEASE SAVEPOINT inactive_read');return $result;
+        } catch (\Throwable $e) {$this->db->exec('ROLLBACK TO SAVEPOINT inactive_read');$this->db->exec('RELEASE SAVEPOINT inactive_read');throw $e;}
+    }
+    public function restore(string $instance,string $id,array $data): array
+    {
+        $allowed=['expected_version','expected_schema_revision','expected_answers_revision','expected_participant_version','confirmation'];
+        foreach (array_keys($data) as $key) if (!in_array($key,$allowed,true)) throw new Problem('復帰では氏名・回答・所属の書換えはできません。',422);
+        $this->db->exec('BEGIN IMMEDIATE');
+        try {
+            $q=$this->db->prepare('SELECT * FROM instances WHERE id=? AND deleted_at IS NULL');$q->execute([$instance]);$schedule=$q->fetch();
+            if (!$schedule) throw new Problem('案件が見つかりません。',404);
+            $row=$this->get($instance,$id);
+            if ($schedule['status']!=='open'||$row['is_active']) throw new Problem('案件または参加者の状態が変わりました。',409);
+            foreach (['version','schema_revision','answers_revision'] as $key) if (!is_int($data['expected_'.$key] ?? null)||$data['expected_'.$key]!==$schedule[$key]) throw new Problem('案件・候補・所属・回答が更新されました。復帰内容を再確認してください。',409);
+            if (!is_int($data['expected_participant_version'] ?? null)||$data['expected_participant_version']!==$row['version']) throw new Problem('参加者が更新されました。復帰内容を再確認してください。',409);
+            if (($data['confirmation'] ?? null)!==$row['display_name']) throw new Problem('確認の氏名が一致しません。',422);
+            $now=gmdate('Y-m-d\TH:i:s\Z');
+            $this->db->prepare('UPDATE participants SET is_active=1,version=version+1,updated_at=? WHERE id=? AND instance_id=?')->execute([$now,$id,$instance]);
+            $this->db->prepare('UPDATE instances SET answers_revision=answers_revision+1,updated_at=? WHERE id=?')->execute([$now,$instance]);
+            $this->db->prepare('INSERT INTO audit_log(instance_id,actor,action,summary_json,created_at) VALUES (?,?,?,?,?)')->execute([$instance,'shared-basic','participant-restore',json_encode(['participant_id'=>$id,'previous_version'=>$row['version']],JSON_THROW_ON_ERROR),$now]);
+            $result=$this->get($instance,$id);$this->db->exec('COMMIT');return $result;
+        } catch (\Throwable $e) {$this->db->exec('ROLLBACK');throw $e;}
+    }
     public function deactivate(string $instance, string $id, array $data): array
     {
         $this->db->exec('BEGIN IMMEDIATE');

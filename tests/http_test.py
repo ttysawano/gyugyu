@@ -303,6 +303,29 @@ class HTTPTests(unittest.TestCase):
         self.assertEqual(self.request(route,'DELETE',{'expected_version':1,'confirmation':'v59'},token=token)[0],200)
         self.assertEqual(self.request(endpoint)[0],404)
 
+    def test_participant_restoration(self):
+        _,h,_=self.request('api/index.php');token=h['X-CSRF-Token']
+        _,_,body=self.request('api/index.php','POST',{'title':'restore','dates':['2026-11-03']},token=token);row=json.loads(body);route='api/index.php?route=/instances/'+row['id']
+        name='<script>復帰</script>'
+        _,_,body=self.request(route+'/participants','POST',{'display_name':name,'submission_key':'c'*32,'expected_version':1,'expected_schema_revision':1,'answers':[]},token=token);person=json.loads(body);endpoint=route+'/participants/'+person['id']+'/restore'
+        self.assertEqual(self.request(route+'/participants/'+person['id'],'PATCH',{'expected_version':1,'expected_schema_revision':1,'expected_participant_version':1,'confirmation':name,'is_active':False},token=token)[0],200)
+        for path in [route+'/participants/inactive','participants.php?id='+row['id'],'assets/participant-restore.mjs']:self.assertEqual(self.request(path,auth=False)[0],401)
+        code,h,body=self.request(route+'/participants/inactive');self.assertEqual(code,200);self.assertIn('no-store',h['Cache-Control']);snapshot=json.loads(body)
+        html=self.request('participants.php?id='+row['id'])[2];self.assertIn('&lt;script&gt;復帰&lt;/script&gt;',html);self.assertNotIn(name,html)
+        req={'expected_version':snapshot['version'],'expected_schema_revision':snapshot['schema_revision'],'expected_answers_revision':snapshot['answers_revision'],'expected_participant_version':2,'confirmation':name}
+        for t,o in [(None,True),(token,False),(token,'https://evil.example')]:self.assertEqual(self.request(endpoint,'POST',req,token=t,origin=o)[0],403)
+        self.assertEqual(self.request(endpoint,'POST',req,token=token,auth=False)[0],401)
+        self.assertEqual(self.request(endpoint,'PUT',req,token=token)[0],405)
+        self.assertEqual(self.request(endpoint,'POST',dict(req,confirmation='wrong'),token=token)[0],422)
+        self.assertEqual(self.request(endpoint,'POST',dict(req,answers=[]),token=token)[0],422)
+        _,_,body=self.request('api/index.php','POST',{'title':'foreign','dates':['2026-11-03']},token=token);other=json.loads(body)
+        self.assertEqual(self.request('api/index.php?route=/instances/'+other['id']+'/participants/'+person['id']+'/restore','POST',req,token=token)[0],404)
+        code,_,body=self.request(endpoint,'POST',req,token=token);self.assertEqual(code,200);restored=json.loads(body)
+        self.assertEqual(restored['id'],person['id']);self.assertEqual(restored['submitted_at'],person['submitted_at']);self.assertEqual(restored['answers'],[]);self.assertEqual(restored['version'],3)
+        self.assertEqual(self.request(endpoint,'POST',req,token=token)[0],409)
+        self.assertEqual(json.loads(self.request(route+'/participants/inactive')[2])['participants'],[])
+        self.assertEqual(json.loads(self.request(route+'/summary')[2])['N'],1)
+
     def test_date_management(self):
         _,h,_=self.request('api/index.php');token=h['X-CSRF-Token']
         _,_,body=self.request('api/index.php','POST',{'title':'days','dates':['2026-11-03']},token=token);row=json.loads(body);ident=row['id'];route='api/index.php?route=/instances/'+ident;endpoint=route+'/days';day=row['days'][0]

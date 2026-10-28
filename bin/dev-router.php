@@ -13,11 +13,11 @@ $path = parse_url($_SERVER['REQUEST_URI'],PHP_URL_PATH);
 if (!is_string($path) || !str_starts_with($path,$base.'/')) { http_response_code(404); exit; }
 $relative = substr($path,strlen($base)+1);
 if ($relative === '') $relative = 'index.php';
-$allowed = ['index.php','create.php','event.php','delete.php','groups.php','days.php','api/index.php'];
+$allowed = ['index.php','create.php','event.php','delete.php','groups.php','days.php','participants.php','api/index.php'];
 if (in_array($relative,$allowed,true)) {
     $_SERVER['SCRIPT_NAME'] = $base.'/'.$relative;
     require dirname(__DIR__).'/public/'.$relative;
-} elseif (in_array($relative,['assets/gyugyu.css','assets/gyugyu-cow.svg','assets/candidates.mjs','assets/answers.mjs','assets/groups.mjs','assets/summary.mjs','assets/exports.mjs','assets/days.mjs'],true)) {
+} elseif (in_array($relative,['assets/gyugyu.css','assets/gyugyu-cow.svg','assets/candidates.mjs','assets/answers.mjs','assets/groups.mjs','assets/summary.mjs','assets/exports.mjs','assets/days.mjs','assets/participant-restore.mjs'],true)) {
     header('Content-Type: '.(str_ends_with($relative,'.css')?'text/css':(str_ends_with($relative,'.mjs')?'text/javascript':'image/svg+xml')));
     readfile(dirname(__DIR__).'/public/'.$relative);
 } else http_response_code(404);
