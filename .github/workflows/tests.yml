@@ -1,0 +1,17 @@
+name: tests
+on: [push, pull_request]
+jobs:
+  php-sqlite:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          php -v
+          php -r 'exit(PHP_VERSION_ID >= 80300 && extension_loaded("pdo_sqlite") && extension_loaded("mbstring") ? 0 : 1);'
+      - run: php tests/run.php
+      - run: python3 tests/http_test.py
+      - run: |
+          while IFS= read -r -d '' file; do
+            php -l "$file" || exit 1
+          done < <(find src public bin tests -name '*.php' -print0)
+      - run: git diff --check

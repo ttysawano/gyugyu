@@ -1,0 +1,119 @@
+<?php
+declare(strict_types=1);
+namespace Gyugyu;
+use PDO;
+final class Problem extends \RuntimeException {}
+final class Schedules
+{
+    public function __construct(private PDO $db) {}
+    private static function text(array $data, string $key, int $limit, bool $required = false): string
+    {
+        $v = array_key_exists($key, $data) ? $data[$key] : '';
+        if (!is_string($v) || !mb_check_encoding($v, 'UTF-8')) throw new Problem('入力形式が不正です。', 422);
+        $v = str_replace(["\r\n", "\r"], "\n", $v);
+        if ($key === 'title') $v = trim($v);
+        if (($required && $v === '') || mb_strlen($v) > $limit || str_contains($v, "\0")) throw new Problem('調整名は1〜140文字、説明は2000文字以内です。', 422);
+        return $v;
+    }
+    public static function preview(array $data): array
+    {
+        $title = self::text($data, 'title', 140, true);
+        $description = self::text($data, 'description', 2000);
+        if (($data['timezone'] ?? 'Asia/Tokyo') !== 'Asia/Tokyo') throw new Problem('タイムゾーンはAsia/Tokyoです。', 422);
+        $dates = $data['dates'] ?? [];
+        if (is_string($dates)) $dates = preg_split('/\R/u', trim($dates));
+        if (!is_array($dates) || count($dates) < 1 || count($dates) > 366) throw new Problem('候補日は1〜366行で指定してください。', 422);
+        $unique = [];
+        foreach ($dates as $date) {
+            if (!is_string($date) || !preg_match('/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/D', trim($date))) throw new Problem('候補日が不正です。', 422);
+            $date = trim($date);
+            $d = \DateTimeImmutable::createFromFormat('!Y-m-d', $date, new \DateTimeZone('Asia/Tokyo'));
+            if (!$d || $d->format('Y-m-d') !== $date || $date < '1900-01-01' || $date > '9998-12-31') throw new Problem('候補日は有効なYYYY-MM-DDで入力してください。', 422);
+            $unique[$date] = true;
+        }
+        $sorted = array_keys($unique); sort($sorted);
+        $window = $data['initial_window'] ?? ['start' => $data['start'] ?? '09:00', 'end' => $data['end'] ?? '18:00', 'end_next_day' => $data['end_next_day'] ?? false];
+        if (!is_array($window)) throw new Problem('時間帯が不正です。', 422);
+        $minutes = [];
+        foreach (['start', 'end'] as $key) {
+            $s = $window[$key] ?? null;
+            if (!is_string($s) || !preg_match('/^(?:[01][0-9]|2[0-3]):(?:00|30)$/D', $s)) throw new Problem('時刻は30分刻みです。', 422);
+            [$h,$m] = array_map('intval', explode(':', $s));
+            $minutes[$key] = $h * 60 + $m;
+        }
+        $next = $window['end_next_day'] ?? false;
+        if (!in_array($next, [true,false,'1','0'], true)) throw new Problem('翌日指定が不正です。', 422);
+        if ($next === true || $next === '1') $minutes['end'] += 1440;
+        if ($minutes['start'] < 360 || $minutes['end'] > 1800 || $minutes['end'] <= $minutes['start']) throw new Problem('当日06:00〜翌日06:00内の正の時間帯を指定してください。', 422);
+        return compact('title','description') + ['dates'=>$sorted,'duplicate_count'=>count($dates)-count($sorted),'start_minute'=>$minutes['start'],'end_minute'=>$minutes['end'],'candidate_slots_per_day'=>($minutes['end']-$minutes['start'])/30];
+    }
+    public function listing(bool $deleted = false): array
+    {
+        $q = $this->db->prepare('SELECT i.id,i.title,i.status,i.version,i.updated_at,COUNT(d.id) AS day_count,MIN(d.local_date) AS first_date,MAX(d.local_date) AS last_date FROM instances i LEFT JOIN instance_days d ON d.instance_id=i.id AND d.archived_at IS NULL WHERE i.deleted_at IS ' . ($deleted ? 'NOT NULL' : 'NULL') . ' GROUP BY i.id ORDER BY i.updated_at DESC,i.id');
+        $q->execute(); return $q->fetchAll();
+    }
+    public function get(string $id, bool $deleted = false): array
+    {
+        $q = $this->db->prepare('SELECT * FROM instances WHERE id=? AND deleted_at IS ' . ($deleted ? 'NOT NULL' : 'NULL'));
+        $q->execute([$id]); $row = $q->fetch();
+        if (!$row) throw new Problem('案件が見つかりません。', 404);
+        $q = $this->db->prepare('SELECT * FROM instance_days WHERE instance_id=? ORDER BY sort_index'); $q->execute([$id]);
+        $row['days'] = $q->fetchAll();
+        $q = $this->db->prepare('SELECT * FROM day_slots WHERE day_id=? ORDER BY ordinal');
+        foreach ($row['days'] as &$day) { $q->execute([$day['id']]); $day['slots'] = $q->fetchAll(); }
+        return $row;
+    }
+    private function transaction(callable $work): mixed
+    {
+        $this->db->exec('BEGIN IMMEDIATE');
+        try { $result = $work(); $this->db->exec('COMMIT'); return $result; }
+        catch (\Throwable $e) { $this->db->exec('ROLLBACK'); throw $e; }
+    }
+    private function audit(string $id, string $action, array $summary): void
+    {
+        $this->db->prepare('INSERT INTO audit_log(instance_id,actor,action,summary_json,created_at) VALUES (?, ?, ?, ?, ?)')->execute([$id,'shared-basic',$action,json_encode($summary, JSON_THROW_ON_ERROR),gmdate('Y-m-d\TH:i:s\Z')]);
+    }
+    public function create(array $data): array
+    {
+        $p = self::preview($data);
+        return $this->transaction(function () use ($p) {
+            $id = bin2hex(random_bytes(16)); $now = gmdate('Y-m-d\TH:i:s\Z');
+            $this->db->prepare('INSERT INTO instances(id,title,description,created_at,updated_at) VALUES (?,?,?,?,?)')->execute([$id,$p['title'],$p['description'],$now,$now]);
+            foreach ($p['dates'] as $index => $date) {
+                $day = bin2hex(random_bytes(16));
+                $this->db->prepare('INSERT INTO instance_days(id,instance_id,local_date,sort_index) VALUES (?,?,?,?)')->execute([$day,$id,$date,$index]);
+                $start = new \DateTimeImmutable($date . ' 06:00:00', new \DateTimeZone('Asia/Tokyo'));
+                $q = $this->db->prepare('INSERT INTO day_slots VALUES (?,?,?,?,?,?)');
+                for ($i=0; $i<48; $i++) {
+                    $utc = fn(int $n) => $start->modify('+' . ($n*30) . ' minutes')->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d\TH:i:s\Z');
+                    $minute = 360 + $i*30;
+                    $q->execute([bin2hex(random_bytes(16)),$day,$i,$utc($i),$utc($i+1),(int)($minute >= $p['start_minute'] && $minute < $p['end_minute'])]);
+                }
+            }
+            $this->audit($id,'create',['title'=>$p['title'],'description'=>$p['description'],'dates'=>$p['dates']]);
+            return $this->get($id);
+        });
+    }
+    public function change(string $id, string $action, array $data): array
+    {
+        return $this->transaction(function () use ($id,$action,$data) {
+            $row = $this->get($id, $action === 'restore');
+            $version = $data['expected_version'] ?? null;
+            if (!(is_int($version) || (is_string($version) && preg_match('/^[0-9]+$/D', $version))) || (int)$version !== $row['version']) throw new Problem('他の利用者が更新しました。再読み込みして変更を確認してください。',409);
+            $title = $row['title']; $description = $row['description']; $status = $row['status']; $deleted = $row['deleted_at']; $before = $row['status_before_delete'];
+            if ($action === 'edit') {
+                if ($status !== 'open') throw new Problem('受付中の案件のみ編集できます。',409);
+                if (array_key_exists('title',$data)) $title = self::text($data,'title',140,true);
+                if (array_key_exists('description',$data)) $description = self::text($data,'description',2000);
+            } elseif ($action === 'delete') {
+                if (($data['confirmation'] ?? null) !== $title) throw new Problem('確認のため案件名を正確に再入力してください。',422);
+                $deleted = gmdate('Y-m-d\TH:i:s\Z'); $before = $status; $status = 'deleted';
+            } elseif ($action === 'restore') {
+                $status = $before; $deleted = null; $before = null;
+            } else throw new Problem('操作が不正です。',400);
+            $this->db->prepare('UPDATE instances SET title=?,description=?,status=?,deleted_at=?,status_before_delete=?,version=version+1,updated_at=? WHERE id=?')->execute([$title,$description,$status,$deleted,$before,gmdate('Y-m-d\TH:i:s\Z'),$id]);
+            $this->audit($id,$action,['title'=>$title,'description'=>$description,'previous_version'=>$row['version']]);
+            return $this->get($id,$action === 'delete');
+        });
+    }
+}
