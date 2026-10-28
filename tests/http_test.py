@@ -157,14 +157,50 @@ class HTTPTests(unittest.TestCase):
         mask.update(expected_answers_revision=impact['answers_revision'],confirm_exclusion=True)
         self.assertEqual(self.request(route+'/candidate-slots/bulk','PATCH',mask,token=token)[0],409)
 
+    def test_groups(self):
+        _,headers,_=self.request('api/index.php');token=headers['X-CSRF-Token']
+        _,_,body=self.request('api/index.php','POST',{'title':'groups','dates':['2026-11-02']},token=token)
+        row=json.loads(body);route='api/index.php?route=/instances/'+row['id']
+        data={'expected_version':1,'expected_schema_revision':1,'name':'constructor'}
+        for path in ['groups.php?id='+row['id'],'assets/groups.mjs',route+'/groups']:
+            self.assertEqual(self.request(path,auth=False)[0],401)
+        for t,o in [(None,True),(token,False),(token,'https://evil.example')]:
+            self.assertEqual(self.request(route+'/groups','POST',data,token=t,origin=o)[0],403)
+        code,_,body=self.request(route+'/groups','POST',data,token=token);self.assertEqual(code,201);group=json.loads(body)
+        self.assertEqual(self.request(route+'/groups','POST',data,token=token)[0],409)
+        payload={'expected_version':1,'expected_schema_revision':2,'expected_participant_version':0,'submission_key':'a'*32,'display_name':'所属','answers':[],'group_ids':[group['id']]}
+        code,_,body=self.request(route+'/participants','POST',payload,token=token);self.assertEqual(code,201);person=json.loads(body)
+        self.assertEqual(person['group_ids'],[group['id']])
+        data={'expected_version':1,'expected_schema_revision':2,'expected_group_version':1,'name':'改名','description':'<script>alert(1)</script>'}
+        self.assertEqual(self.request(route+'/groups/'+group['id'],'PATCH',data,token=token)[0],200)
+        page=self.request('groups.php?id='+row['id'])[2];self.assertIn('&lt;script&gt;',page)
+        archive=dict(data,expected_schema_revision=3,expected_group_version=2,expected_answers_revision=1,confirmation='改名')
+        self.assertEqual(self.request(route+'/groups/'+group['id'],'DELETE',archive,token=token)[0],409)
+        archive['expected_answers_revision']=2
+        self.assertEqual(self.request(route+'/groups/'+group['id'],'DELETE',archive,token=token)[0],200)
+        self.assertEqual(json.loads(self.request(route)[2])['participants'][0]['group_ids'],[])
+        self.assertEqual(self.request(route+'/groups/'+group['id']+'/restore','POST',dict(archive,expected_schema_revision=4,expected_group_version=3),token=token)[0],200)
+        self.assertEqual(json.loads(self.request(route)[2])['participants'][0]['group_ids'],[group['id']])
+        for i in range(7):
+            data={'expected_version':1,'expected_schema_revision':5+i,'name':'group'+str(i)}
+            self.assertEqual(self.request(route+'/groups','POST',data,token=token)[0],201)
+        # Independent PHP processes race for ninth slot against the same expected revision.
+        script="require "+json.dumps(str(ROOT/'src/bootstrap.php'))+"; try { (new Gyugyu\\Groups(Gyugyu\\Database::connect()))->change($argv[1],null,'create',['expected_version'=>1,'expected_schema_revision'=>12,'name'=>$argv[2]]); echo '201'; } catch (Gyugyu\\Problem $e) {echo $e->getCode();}"
+        processes=[subprocess.Popen([PHP,'-r',script,row['id'],'race'+str(i)],env=self.env,stdout=subprocess.PIPE,stderr=subprocess.PIPE) for i in range(2)]
+        results=[process.communicate(timeout=10) for process in processes]
+        self.assertEqual(sorted(out.decode() for out,err in results),['201','409'])
+        self.assertEqual(len(json.loads(self.request(route)[2])['groups']),9)
+
     def test_backup_restore(self):
         fixture = "require " + json.dumps(str(ROOT/'src/bootstrap.php')) + "; $s=new Gyugyu\\Schedules(Gyugyu\\Database::connect()); $r=$s->create(['title'=>'backup fixture','dates'=>['2026-11-05']]);  $p=new Gyugyu\\Participants(Gyugyu\\Database::connect()); $p->submit($r['id'],null,['display_name'=>'backup participant','expected_version'=>1,'expected_schema_revision'=>1,'submission_key'=>str_repeat('a',32),'answers'=>[['slot_id'=>$r['days'][0]['slots'][6]['id'],'state'=>'yes']]]); echo $r['id'];"
         ident=subprocess.check_output([PHP,'-r',fixture],env=self.env).decode()
+        membership="require "+json.dumps(str(ROOT/'src/bootstrap.php'))+"; $db=Gyugyu\\Database::connect(); $s=new Gyugyu\\Schedules($db); $r=$s->get('"+ident+"'); $g=(new Gyugyu\\Groups($db))->change($r['id'],null,'create',['name'=>'backup group','expected_version'=>1,'expected_schema_revision'=>1]); $p=$r['participants'][0]; (new Gyugyu\\Participants($db))->submit($r['id'],$p['id'],['display_name'=>$p['display_name'],'expected_version'=>1,'expected_schema_revision'=>2,'expected_participant_version'=>1,'group_ids'=>[$g['id']],'answers'=>$p['answers']]);"
+        subprocess.run([PHP,'-r',membership],env=self.env,check=True,capture_output=True)
         target=self.tmp.name+'/backup.sqlite'
         subprocess.run([PHP,str(ROOT/'bin/backup.php'),target],env=self.env,check=True,capture_output=True)
         checkcode = "require " + json.dumps(str(ROOT/'src/bootstrap.php')) + "; $d=Gyugyu\\Database::connect(); if($d->query('PRAGMA integrity_check')->fetchColumn()!=='ok' || $d->query('PRAGMA foreign_key_check')->fetchAll()!==[]) exit(1); Gyugyu\\Database::migrate($d);"
         subprocess.run([PHP,'-r',checkcode],env=dict(self.env,GYUGYU_DB=target),check=True,capture_output=True)
-        restored="require " + json.dumps(str(ROOT/'src/bootstrap.php')) + "; $s=new Gyugyu\\Schedules(Gyugyu\\Database::connect()); $r=$s->get('"+ident+"'); if($r['title']!=='backup fixture' || count($r['days'][0]['slots'])!==48 || count($r['participants'])!==1 || $r['participants'][0]['answers'][0]['state']!=='yes') exit(1);"
+        restored="require " + json.dumps(str(ROOT/'src/bootstrap.php')) + "; $s=new Gyugyu\\Schedules(Gyugyu\\Database::connect()); $r=$s->get('"+ident+"'); if($r['title']!=='backup fixture' || count($r['days'][0]['slots'])!==48 || count($r['participants'])!==1 || $r['participants'][0]['answers'][0]['state']!=='yes' || count($r['groups'])!==1 || $r['participants'][0]['group_ids']!==[$r['groups'][0]['id']]) exit(1);"
         subprocess.run([PHP,'-r',restored],env=dict(self.env,GYUGYU_DB=target),check=True,capture_output=True)
         # Existing destinations must not be overwritten.
         self.assertNotEqual(subprocess.run([PHP,str(ROOT/'bin/backup.php'),target],env=self.env,capture_output=True).returncode,0)

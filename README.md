@@ -2,7 +2,7 @@
 
 PHP + SQLiteによる、共通Basic認証下のスケジュール調整アプリです。開発仕様の正本は [docs/SPEC.md](docs/SPEC.md) です。
 
-実装済み：複数案件の一覧・作成・プレビュー・詳細、調整名／説明編集、確認付き論理削除・復元、版数競合検知、監査ログ。日別候補グリッドと候補帯編集も実装済みです。参加者登録・共有回答編集・確認付き非表示化・参加者数／提出済人数も実装済みです。グループ・集計・エクスポート・受付状態の変更UI/APIは後続です。
+実装済み：複数案件の一覧・作成・プレビュー・詳細、調整名／説明編集、確認付き論理削除・復元、版数競合検知、監査ログ。日別候補グリッドと候補帯編集も実装済みです。参加者登録・共有回答編集・確認付き非表示化・参加者数／提出済人数も実装済みです。グループ管理・複数所属・参加者表示フィルターも実装済みです。集計・エクスポート・受付状態の変更UI/APIは後続です。
 
 ## 必要環境と初期化
 
@@ -117,3 +117,13 @@ CIではPHP／HTTP／JSに加え、Playwright Chromiumの既存CRUD・候補編�
 既存環境にはバックアップ後に `php bin/migrate.php` を実行し、`002_participants.sql` を適用してください。Webアクセス時の自動マイグレーションは行いません。参加者・回答・監査もSQLiteバックアップに含まれ、HTTP試験でバックアップからの復元を検証します。
 
 APIの具体的な契約はSPEC第20節を参照してください。新規登録の `submission_key` は重複送信検出用の公開値で、既存回答の編集資格情報ではありません。候補保存にはプレビューで返した `answers_revision` を `expected_answers_revision` として送信します。プレビュー後に他端末が回答を保存した場合、候補保存は409となり再確認が必要です。
+
+## グループと所属
+
+`php bin/migrate.php` で003移行を適用します。既存の参加者・回答は保持され、初期所属は空です。詳細の「グループを登録・管理」から0〜9件の追加・編集・確認付き削除・復元を行います。回答編集内の所属チェックボックスを氏名・回答とまとめて保存します。
+
+APIは `/instances/{id}/groups` のGET/POST、`/groups/{group_id}` のPATCH/DELETE、`/groups/{group_id}/restore` のPOST。期待値は `expected_version`、`expected_schema_revision`、既存グループは `expected_group_version`。削除には `confirmation`（保存済み名）と影響人数確認時の `expected_answers_revision` も必要です。参加者submissionの `group_ids` は同案件の有効ID配列。空配列は未所属、キー省略は既存所属維持です。
+
+表示マスクは全員／選択グループを含む（OR）／除外。include空は0人、exclude空は全員。0グループでは全員でUI非表示。ブラウザーのタブ内で条件を保持し、DB回答を変更しません。集計と未入力人数・順位は後続です。
+
+追加の回帰確認：`node --test tests/*.test.mjs`、`python3 tests/candidate_browser.py`、`python3 tests/answer_browser.py`、`python3 tests/group_browser.py`。CIはこれらを全て実行します。
