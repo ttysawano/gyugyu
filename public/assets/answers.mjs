@@ -10,13 +10,18 @@ export function submission(values,slots) {
 function initialize(root) {
     const $=id=>root.querySelector('#'+id), panels=[...root.querySelectorAll('.day-panel')];
     const metadata=document.querySelector('#metadata-editor');
-    let slots={},active=null,draft=null,nameBefore='',saving=false,stroke=null,inspected=null;
+    let slots={},active=null,draft=null,groupsBefore=[],nameBefore='',saving=false,stroke=null,inspected=null;
     let version=Number(root.dataset.version),revision=Number(root.dataset.revision);
     const status=text=>{$('answer-status').textContent=text;};
     function readSlots() { slots=Object.fromEntries(panels.map(panel=>[panel.dataset.day,[...panel.querySelectorAll('.candidate-cell')].map(cell=>({id:cell.dataset.slot,candidate:cell.getAttribute('aria-pressed')==='true',label:cell.dataset.label}))])); }
     readSlots();
+    $('answer-inputs').append($('membership-template').content.cloneNode(true));
+    const groupInputs=[...root.querySelectorAll('#participant-groups input')];
+    $('participant-groups').hidden=!groupInputs.length;
+    const selectedGroups=()=>groupInputs.filter(input=>input.checked).map(input=>input.value);
+
     const rows=id=>[...root.querySelectorAll('.participant-row')].filter(row=>row.dataset.participant===id);
-    const dirty=()=>!!draft&&(draft.delta.changed>0||$('participant-name').value!==nameBefore||active.id==='draft');
+    const dirty=()=>!!draft&&(draft.delta.changed>0||$('participant-name').value!==nameBefore||JSON.stringify(selectedGroups())!==JSON.stringify(groupsBefore)||active.id==='draft');
     function inspect(cell) {
         if(!cell) return;
         inspected=cell; $('answer-inspect').textContent=cell.getAttribute('aria-label')+'（日本時間）';
@@ -48,7 +53,7 @@ function initialize(root) {
             });
         }
         if(inspected?.isConnected) inspect(inspected);
-        labels();
+        labels(); root.dispatchEvent(new CustomEvent('participants-rendered'));
     }
     function setMode() { root.dataset.answerEditing=active?'1':''; root.dispatchEvent(new CustomEvent('answer-mode')); render(); }
     function newRows() {
@@ -67,6 +72,9 @@ function initialize(root) {
         if(id==='draft') newRows();
         const selected=rows(id),first=selected[0];
         active={id,version:Number(first.dataset.version),key:[...crypto.getRandomValues(new Uint8Array(16))].map(n=>n.toString(16).padStart(2,'0')).join('')};
+        groupsBefore=JSON.parse(first.dataset.groups||'[]');
+        groupInputs.forEach(input=>input.checked=groupsBefore.includes(input.value));
+        groupsBefore=selectedGroups();
         nameBefore=first.dataset.name; $('participant-name').value=nameBefore;
         draft=new Draft(Object.fromEntries(selected.map(row=>[row.closest('[data-day]').dataset.day,[...row.querySelectorAll('.answer-cell')].map(cell=>cell.dataset.state)])));
         status('回答を編集中（未保存）'); setMode(); $('participant-name').focus();
@@ -117,7 +125,7 @@ function initialize(root) {
     $('answer-undo').addEventListener('click',()=>{finish();draft.undo();render();});
     $('answer-redo').addEventListener('click',()=>{finish();draft.redo();render();});
     function discard() { if(active?.id==='draft') rows('draft').forEach(row=>row.remove()); active=null;draft=null;setMode(); }
-    $('answer-cancel').addEventListener('click',()=>{finish(true);if(dirty()&&!confirm('未保存の氏名・回答を破棄しますか？'))return;discard();status('回答編集を取り消しました。');});
+    $('answer-cancel').addEventListener('click',()=>{finish(true);if(dirty()&&!confirm('未保存の氏名・所属・回答を破棄しますか？'))return;discard();status('回答編集を取り消しました。');});
     $('answer-reload').addEventListener('click',()=>{if(dirty()&&!confirm('下書きを破棄して最新版を読み直しますか？'))return;discard();location.reload();});
     window.addEventListener('beforeunload',event=>{if(dirty()||saving){event.preventDefault();event.returnValue='';}});
     async function send(hide=false) {
@@ -134,7 +142,7 @@ function initialize(root) {
         try {
             const fresh=active.id==='draft';
             const path=root.dataset.api+'/participants'+(fresh?'':'/'+active.id+(hide?'':'/submission'));
-            const payload={expected_version:version,expected_schema_revision:revision,expected_participant_version:active.version,submission_key:active.key,display_name:$('participant-name').value,group_ids:[],answers:submission(draft.value,slots),confirmation,is_active:false};
+            const payload={expected_version:version,expected_schema_revision:revision,expected_participant_version:active.version,submission_key:active.key,display_name:$('participant-name').value,group_ids:selectedGroups(),answers:submission(draft.value,slots),confirmation,is_active:false};
             const response=await fetch(path,{method:hide?'PATCH':fresh?'POST':'PUT',headers:{'Content-Type':'application/json','X-CSRF-Token':root.dataset.csrf},body:JSON.stringify(payload),signal:controller.signal});
             if(!response.ok) {
                 const problem=await response.json();
@@ -159,7 +167,7 @@ function initialize(root) {
             else {
                 const values=Object.fromEntries(participant.answers.map(answer=>[answer.slot_id,answer.state]));
                 for(const row of rows(active.id)) {
-                    row.dataset.participant=participant.id;row.dataset.version=participant.version;row.dataset.name=participant.display_name;
+                    row.dataset.participant=participant.id;row.dataset.version=participant.version;row.dataset.name=participant.display_name;row.dataset.groups=JSON.stringify(participant.group_ids);
                     for(const cell of row.querySelectorAll('.answer-cell')) cell.dataset.state=values[cell.dataset.slot]||'unknown';
                 }
             }

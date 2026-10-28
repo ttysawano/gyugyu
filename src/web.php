@@ -2,6 +2,7 @@
 declare(strict_types=1);
 require_once __DIR__ . '/bootstrap.php';
 require_once __DIR__ . '/grid.php';
+require_once __DIR__ . '/group-page.php';
 use Gyugyu\{Security,Schedules,Database,Problem};
 function h(mixed $s): string { return htmlspecialchars((string)$s, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); }
 function jstTime(string $utc): string { return (new DateTimeImmutable($utc))->setTimezone(new DateTimeZone('Asia/Tokyo'))->format('Y-m-d H:i:s') . ' JST'; }
@@ -26,6 +27,7 @@ function runWeb(): void {
     if (!in_array($method,['GET','POST'],true)) throw new Problem('許可されていないメソッドです。',405);
     $id = $_GET['id'] ?? '';
     if (!is_string($id)) throw new Problem('IDが不正です。',400);
+    if ($page === 'groups.php') { groupPage($service,$id,$method); return; }
     $error = null; $preview = null;
     if ($method === 'POST') {
         try {

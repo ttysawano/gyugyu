@@ -64,6 +64,7 @@ final class Schedules
         $q=$this->db->prepare('SELECT id FROM participants WHERE instance_id=? AND is_active=1 ORDER BY created_at,id'); $q->execute([$id]);
         $participants=new Participants($this->db);
         $row['participants']=array_map(fn($pid)=>$participants->get($id,$pid),$q->fetchAll(PDO::FETCH_COLUMN));
+        $row['groups']=(new Groups($this->db))->listing($id);
         return $row;
     }
     private function transaction(callable $work): mixed

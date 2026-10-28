@@ -1,16 +1,16 @@
 <?php
 declare(strict_types=1);
 require dirname(__DIR__,2) . '/src/bootstrap.php';
-use Gyugyu\{Security,Database,Schedules,Participants,Problem};
+use Gyugyu\{Security,Database,Schedules,Participants,Groups,Problem};
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store'); header('X-Content-Type-Options: nosniff');
 try {
     Security::authorize(); Security::session();
     $service = new Schedules(Database::connect());
     $route = $_GET['route'] ?? '/instances';
-    if (!is_string($route) || !preg_match('~^/instances(?:/([a-f0-9]{32})(/restore|/candidate-slots/(?:bulk|preview)|/participants(?:/([a-f0-9]{32})(/submission)?)?)?)?$~D',$route,$m)) throw new Problem('見つかりません。',404);
+    if (!is_string($route) || !preg_match('~^/instances(?:/([a-f0-9]{32})(/restore|/candidate-slots/(?:bulk|preview)|/participants(?:/([a-f0-9]{32})(/submission)?)?|/groups(?:/([a-f0-9]{32})(/restore)?)?)?)?$~D',$route,$m)) throw new Problem('見つかりません。',404);
     $method = $_SERVER['REQUEST_METHOD']; $id = $m[1] ?? null; $operation = $m[2] ?? ''; $restore = $operation === '/restore'; $bulk = $operation === '/candidate-slots/bulk';
-    $participantId=$m[3] ?? null;
+    $participantId=$m[3] ?? null; $groupId=($m[5] ?? '') ?: null; $groupRestore=isset($m[6]);
     $data = [];
     if ($method !== 'GET') {
         if (!str_starts_with($_SERVER['CONTENT_TYPE'] ?? '', 'application/json')) throw new Problem('JSONが必要です。',415);
@@ -26,7 +26,11 @@ try {
     if ($method === 'GET' && $operation === '') {
         $result = $id ? $service->get($id) : $service->listing(($_GET['deleted'] ?? '') === '1');
         header('X-CSRF-Token: '.$_SESSION['csrf']);
-    } elseif ($method === 'POST' && !$id) { $result = $service->create($data); http_response_code(201); }
+    } elseif ($method==='GET' && $id && $operation==='/groups') {
+        $row=$service->get($id); $result=['groups'=>(new Groups(Database::connect()))->listing($id,($_GET['archived'] ?? '')==='1'),'version'=>$row['version'],'schema_revision'=>$row['schema_revision'],'answers_revision'=>$row['answers_revision']];
+    } elseif ($method==='POST' && $id && $operation==='/groups') { $result=(new Groups(Database::connect()))->change($id,null,'create',$data); http_response_code(201); }
+    elseif ($groupId && (($method==='PATCH' && !$groupRestore) || ($method==='DELETE' && !$groupRestore) || ($method==='POST' && $groupRestore))) $result=(new Groups(Database::connect()))->change($id,$groupId,$groupRestore?'restore':($method==='DELETE'?'archive':'edit'),$data);
+    elseif ($method === 'POST' && !$id) { $result = $service->create($data); http_response_code(201); }
     elseif ($method === 'POST' && $id && $operation === '/candidate-slots/preview') $result=$service->candidates($id,$data,true);
     elseif ($method === 'POST' && $id && $operation === '/participants') { $result=(new Participants(Database::connect()))->submit($id,null,$data); http_response_code(201); }
     elseif ($method === 'PATCH' && $id && $participantId && !isset($m[4])) $result=(new Participants(Database::connect()))->deactivate($id,$participantId,$data);

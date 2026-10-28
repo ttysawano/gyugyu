@@ -11,7 +11,9 @@ final class Participants
         $q->execute([$instance,$id]); $row=$q->fetch();
         if (!$row) throw new Problem('参加者が見つかりません。',404);
         $q=$this->db->prepare('SELECT slot_id,state FROM answers WHERE participant_id=? ORDER BY slot_id'); $q->execute([$id]);
-        $row['answers']=$q->fetchAll(); return $row;
+        $row['answers']=$q->fetchAll();
+        $q=$this->db->prepare('SELECT g.id FROM participant_groups pg JOIN instance_groups g ON g.id=pg.group_id WHERE pg.participant_id=? AND g.archived_at IS NULL ORDER BY g.sort_index,g.id'); $q->execute([$id]);
+        $row['group_ids']=$q->fetchAll(PDO::FETCH_COLUMN); return $row;
     }
     public function deactivate(string $instance, string $id, array $data): array
     {
@@ -35,7 +37,7 @@ final class Participants
         if (!is_string($name) || !mb_check_encoding($name,'UTF-8') || str_contains($name,"\0")) throw new Problem('氏名の形式が不正です。',422);
         $name=preg_replace('/^[\s\p{Z}]+|[\s\p{Z}]+$/u','',$name);
         if ($name==='' || mb_strlen($name)>80) throw new Problem('氏名は1〜80文字で入力してください。',422);
-        if (array_key_exists('group_ids',$data) && $data['group_ids'] !== []) throw new Problem('グループはこの段階では0件です。',422);
+        if (array_key_exists('group_ids',$data) && (!is_array($data['group_ids']) || !array_is_list($data['group_ids']) || count($data['group_ids'])>9)) throw new Problem('所属グループの形式が不正です。',422);
         $answers=$data['answers'] ?? null;
         if (!is_array($answers) || !array_is_list($answers) || count($answers)>366*48) throw new Problem('回答の形式が不正です。',422);
         // A public per-form request key prevents duplicate registration after a lost response.
@@ -58,6 +60,12 @@ final class Participants
                 $q=$this->db->prepare('SELECT id FROM participants WHERE instance_id=? AND submission_key=?'); $q->execute([$instance,$key]);
                 if ($q->fetchColumn()) throw new Problem('この登録は既に保存されています。一覧を再読み込みして確認してください。',409);
             }
+            $groups=$data['group_ids'] ?? ($previous['group_ids'] ?? []); $seenGroups=[];
+            $q=$this->db->prepare('SELECT id FROM instance_groups WHERE instance_id=? AND archived_at IS NULL'); $q->execute([$instance]); $validGroups=array_fill_keys($q->fetchAll(PDO::FETCH_COLUMN),true);
+            foreach ($groups as $group) {
+                if (!is_string($group) || !isset($validGroups[$group]) || isset($seenGroups[$group])) throw new Problem('この案件の有効グループを重複なく指定してください。',422);
+                $seenGroups[$group]=true;
+            }
             $q=$this->db->prepare('SELECT s.id FROM day_slots s JOIN instance_days d ON d.id=s.day_id WHERE d.instance_id=? AND d.archived_at IS NULL AND s.is_candidate=1'); $q->execute([$instance]);
             $valid=array_fill_keys($q->fetchAll(PDO::FETCH_COLUMN),true); $seen=[];
             foreach ($answers as $answer) {
@@ -72,10 +80,13 @@ final class Participants
                 $this->db->prepare('UPDATE participants SET display_name=?,version=version+1,submitted_at=?,updated_at=? WHERE id=?')->execute([$name,$now,$now,$id]);
                 $this->db->prepare('DELETE FROM answers WHERE participant_id=? AND slot_id IN (SELECT s.id FROM day_slots s JOIN instance_days d ON d.id=s.day_id WHERE d.instance_id=? AND d.archived_at IS NULL AND s.is_candidate=1)')->execute([$id,$instance]);
             }
+            $this->db->prepare('DELETE FROM participant_groups WHERE participant_id=? AND group_id IN (SELECT id FROM instance_groups WHERE instance_id=? AND archived_at IS NULL)')->execute([$id,$instance]);
+            $q=$this->db->prepare('INSERT INTO participant_groups(participant_id,group_id,instance_id) VALUES (?,?,?)');
+            foreach ($groups as $group) $q->execute([$id,$group,$instance]);
             $q=$this->db->prepare('INSERT INTO answers(participant_id,slot_id,state,updated_at) VALUES (?,?,?,?)');
             foreach ($answers as $answer) $q->execute([$id,$answer['slot_id'],$answer['state'],$now]);
             $this->db->prepare('UPDATE instances SET answers_revision=answers_revision+1,updated_at=? WHERE id=?')->execute([$now,$instance]);
-            $summary=['participant_id'=>$id,'display_name'=>$name,'previous_version'=>$previous['version'] ?? null,'answers'=>$answers];
+            $summary=['participant_id'=>$id,'display_name'=>$name,'previous_version'=>$previous['version'] ?? null,'group_ids'=>$groups,'answers'=>$answers];
             $this->db->prepare('INSERT INTO audit_log(instance_id,actor,action,summary_json,created_at) VALUES (?,?,?,?,?)')->execute([$instance,'shared-basic',$previous?'participant-submit':'participant-create',json_encode($summary,JSON_THROW_ON_ERROR),$now]);
             $result=$this->get($instance,$id); $this->db->exec('COMMIT'); return $result;
         } catch (\Throwable $e) { $this->db->exec('ROLLBACK'); throw $e; }
