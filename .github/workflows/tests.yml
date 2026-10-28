@@ -25,4 +25,5 @@ jobs:
           /tmp/gyugyu-test-venv/bin/python tests/candidate_browser.py
           /tmp/gyugyu-test-venv/bin/python tests/answer_browser.py
           /tmp/gyugyu-test-venv/bin/python tests/group_browser.py
+          /tmp/gyugyu-test-venv/bin/python tests/summary_browser.py
       - run: git diff --check

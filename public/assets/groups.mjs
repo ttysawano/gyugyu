@@ -1,26 +1,31 @@
-export function matches(mode, selected, memberships) {
-    const included=memberships.some(id=>selected.includes(id));
-    return mode==='include'?included:mode==='exclude'?!included:true;
-}
+import {matches,summaryView} from './summary.mjs';
+export {matches};
 function initialize(root) {
     const filter=root.querySelector('#group-filter'),mode=root.querySelector('#group-mode');
     const inputs=[...filter.querySelectorAll('input')],ids=inputs.map(input=>input.value);
     const key='gyugyu-mask-'+root.dataset.instance,metadata=document.querySelector('#metadata-editor');
     let state={mode:'all',selected:[]};
+    let display='target';const view=root.querySelector('#summary-mode'),summarize=summaryView(root);
     try {const saved=JSON.parse(sessionStorage.getItem(key));if(saved&&['all','include','exclude'].includes(saved.mode)&&Array.isArray(saved.selected))state={mode:saved.mode,selected:saved.selected.filter(id=>ids.includes(id))};} catch {}
     if(!ids.length)state={mode:'all',selected:[]};
     const busy=()=>!!root.dataset.answerEditing||!!root.dataset.candidateEditing||!!metadata?.open;
     function render() {
         mode.value=state.mode;inputs.forEach(input=>input.checked=state.selected.includes(input.value));filter.disabled=busy();
+        view.value=display;view.disabled=busy();
         const people=new Set(),visible=new Set();
         for(const row of root.querySelectorAll('.participant-row')) {
             const id=row.dataset.participant;
-            row.hidden=id!=='draft'&&!matches(state.mode,state.selected,JSON.parse(row.dataset.groups||'[]'));
-            if(id!=='draft'){people.add(id);if(!row.hidden)visible.add(id);}
+            const included=matches(state.mode,state.selected,JSON.parse(row.dataset.groups||'[]'));
+            row.hidden=id!=='draft'&&!row.classList.contains('answer-editing')&&(display==='summary'||display==='target'&&!included);
+            row.classList.toggle('outside-mask',!included);
+            if(id!=='draft'){people.add(id);if(included)visible.add(id);}
         }
-        root.querySelector('#group-status').textContent=`対象${visible.size}人／全${people.size}人`+(state.mode==='include'&&!state.selected.length?'（グループ未選択）':'')+'。時間別の未入力数・集計は未実装です。';
+        root.querySelector('#group-status').textContent=`対象${visible.size}人／全${people.size}人`+(state.mode==='include'&&!state.selected.length?'（グループ未選択）':'')+'。未入力人数は時刻ごとの内訳に表示します。';
+        summarize(state.mode,state.selected);
         root.querySelector('#group-manage').setAttribute('aria-disabled',String(busy()));
     }
+    view.addEventListener('change',()=>{if(!busy())display=view.value;render();});
+    root.addEventListener('candidate-saved',render);
     filter.addEventListener('change',()=>{
         if(!busy()){state={mode:mode.value,selected:inputs.filter(input=>input.checked).map(input=>input.value)};try{sessionStorage.setItem(key,JSON.stringify(state));}catch{}}
         render();

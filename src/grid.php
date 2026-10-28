@@ -1,7 +1,7 @@
 <?php
 declare(strict_types=1);
 function candidateGrid(array $row): void {
-    echo '<section id="candidate-grid" data-instance="'.h($row['id']).'" data-status="'.h($row['status']).'" data-version="'.h($row['version']).'" data-revision="'.h($row['schema_revision']).'" data-api="'.h(url('api/index.php?route=/instances/'.$row['id'])).'" data-csrf="'.h($_SESSION['csrf']).'" data-density="16"><h2>日別の候補時間帯</h2><p>● 候補 · — 候補外。全員が参加者の回答を編集できます。集計・順位・出力は後続です。</p><noscript>候補帯の編集にはJavaScriptを有効にしてください。</noscript>';
+    echo '<section id="candidate-grid" data-instance="'.h($row['id']).'" data-status="'.h($row['status']).'" data-version="'.h($row['version']).'" data-revision="'.h($row['schema_revision']).'" data-api="'.h(url('api/index.php?route=/instances/'.$row['id'])).'" data-csrf="'.h($_SESSION['csrf']).'" data-density="16"><h2>日別の候補時間帯</h2><p>● 候補 · — 候補外。全員が参加者の回答を編集できます。出力・日付変更・受付状態変更は後続です。</p><noscript>候補帯の編集にはJavaScriptを有効にしてください。</noscript>';
     echo '<label>30分セルの幅<select id="grid-density"><option value="16">16px</option><option value="20">20px</option><option value="24">24px</option></select></label>';
     if ($row['status'] === 'open') echo '<button type="button" id="candidate-edit" hidden>候補帯を編集</button>';
     echo '<p id="candidate-status" role="status" aria-live="polite">閲覧中</p><p id="candidate-inspect" role="status" aria-live="polite">セルにフォーカス、またはタップすると時刻と候補状態を確認できます。</p><div id="candidate-tools" hidden><fieldset id="candidate-inputs"><legend>候補帯を編集中</legend><p>パレットを選び、セルをドラッグ、またはキーボードで選択してください。タッチでの横移動は表の時間見出しをスワイプしてください。</p><label>パレット<select id="candidate-palette"><option value="true">候補にする</option><option value="false">候補外にする</option></select></label><button type="button" id="candidate-undo">Undo</button> <button type="button" id="candidate-redo">Redo</button><fieldset><legend>一括操作</legend><label>対象日<select id="candidate-scope"><option value="all">全日</option><option value="selected">選択した日</option></select></label><div id="candidate-days">';
@@ -14,6 +14,8 @@ function candidateGrid(array $row): void {
     echo '<template id="membership-template"><fieldset id="participant-groups"><legend>所属（複数選択・未所属可）</legend>';
     foreach ($row['groups'] as $group) echo '<label><input type="checkbox" value="'.h($group['id']).'"> '.h($group['name']).'</label>';
     echo '</fieldset></template>';
+    echo '<label>表示モード<select id="summary-mode"><option value="target">対象者のみ表示</option><option value="all">全員表示</option><option value="summary">集計のみ</option></select></label><p id="summary-source"></p><div id="summary-detail" aria-live="polite"></div><details><summary>候補順位（30分単位・同点は日時順）</summary><p id="summary-empty">順位対象なし</p><ol id="summary-ranking"></ol></details>';
+    $summary=Gyugyu\Summary::calculate($row);$totals=array_column($summary['slots'],null,'id');
     $names=array_count_values(array_column($row['participants'],'display_name'));
     foreach ($row['days'] as $day) {
         echo '<div class="day-panel" data-day="'.h($day['id']).'"><h3>'.h($day['local_date']).'</h3><div class="day-scroll" tabindex="0" role="region" aria-label="'.h($day['local_date']).' 候補帯（横スクロール）"><table class="day-grid"><caption>'.h($day['local_date']).' 当日06時〜翌06時（日本時間）</caption><colgroup><col class="name-column">';
@@ -25,7 +27,7 @@ function candidateGrid(array $row): void {
             $d = (new DateTimeImmutable($slot['starts_at_utc']))->setTimezone(new DateTimeZone('Asia/Tokyo'));
             $label = $d->format('Y-m-d H:i').'〜'.$d->modify('+30 minutes')->format('H:i');
             $active = (bool)$slot['is_candidate'];
-            echo '<td><button type="button" class="candidate-cell" data-slot="'.h($slot['id']).'" data-ordinal="'.h($slot['ordinal']).'" data-label="'.h($label).'" aria-label="'.h($label).' '.($active?'候補':'候補外').'" aria-pressed="'.($active?'true':'false').'" title="'.h($label).'">'.($active?'●':'—').'</button></td>';
+            echo '<td><button type="button" class="candidate-cell" data-slot="'.h($slot['id']).'" data-utc="'.h($slot['starts_at_utc']).'" data-ordinal="'.h($slot['ordinal']).'" data-label="'.h($label).'" aria-label="'.h($label).' '.($active?'候補':'候補外').'" aria-pressed="'.($active?'true':'false').'" title="'.h($label).'">'.($active?'●':'—').'</button></td>';
         }
         echo '</tr>';
         foreach ($row['participants'] as $participant) {
@@ -38,6 +40,14 @@ function candidateGrid(array $row): void {
                 $time=$d->format('Y-m-d H:i').'〜'.$d->modify('+30 minutes')->format('H:i');
                 $symbol=['yes'=>'○','maybe'=>'△','no'=>'×','unknown'=>'—'][$value];
                 echo '<td><button type="button" class="answer-cell" data-slot="'.h($slot['id']).'" data-state="'.h($value).'" data-label="'.h($time).'" data-candidate="'.($slot['is_candidate']?'true':'false').'" aria-label="'.h($time.' '.$symbol.($slot['is_candidate']?'':' 候補外')).'">'.$symbol.'</button></td>';
+            }
+            echo '</tr>';
+        }
+        foreach (['yes'=>'○','maybe'=>'△','no'=>'×'] as $state=>$symbol) {
+            echo '<tr class="summary-row"><th scope="row">'.h($symbol).'</th>';
+            foreach ($day['slots'] as $slot) {
+                $total=$totals[$slot['id']];
+                echo '<td><button type="button" class="summary-cell" data-slot="'.h($slot['id']).'" data-state="'.h($state).'" aria-label="'.h(jstTime($slot['starts_at_utc']).' '.$symbol.' 対象'.$total['N'].'人／未入力'.$total['counts']['unknown'].'人').'">'.($slot['is_candidate']?($total['N']?$total['counts'][$state]:'—'):'').'</button></td>';
             }
             echo '</tr>';
         }

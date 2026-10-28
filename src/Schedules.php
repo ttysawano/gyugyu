@@ -54,10 +54,26 @@ final class Schedules
     }
     public function get(string $id, bool $deleted = false): array
     {
+        // PDO 8.3 does not reliably report transactions started with SQL BEGIN IMMEDIATE.
+        // A savepoint gives a consistent read both standalone and inside existing writes.
+        $this->db->exec('SAVEPOINT schedule_read');
+        try {
+            $row=$this->readSnapshot($id,$deleted);
+            $this->db->exec('RELEASE SAVEPOINT schedule_read');
+            return $row;
+        } catch (\Throwable $e) {
+            $this->db->exec('ROLLBACK TO SAVEPOINT schedule_read');
+            $this->db->exec('RELEASE SAVEPOINT schedule_read');
+            throw $e;
+        }
+    }
+
+    private function readSnapshot(string $id,bool $deleted): array
+    {
         $q = $this->db->prepare('SELECT * FROM instances WHERE id=? AND deleted_at IS ' . ($deleted ? 'NOT NULL' : 'NULL'));
         $q->execute([$id]); $row = $q->fetch();
         if (!$row) throw new Problem('案件が見つかりません。', 404);
-        $q = $this->db->prepare('SELECT * FROM instance_days WHERE instance_id=? ORDER BY sort_index'); $q->execute([$id]);
+        $q = $this->db->prepare('SELECT * FROM instance_days WHERE instance_id=? AND archived_at IS NULL ORDER BY sort_index'); $q->execute([$id]);
         $row['days'] = $q->fetchAll();
         $q = $this->db->prepare('SELECT * FROM day_slots WHERE day_id=? ORDER BY ordinal');
         foreach ($row['days'] as &$day) { $q->execute([$day['id']]); $day['slots'] = $q->fetchAll(); }

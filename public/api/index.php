@@ -1,14 +1,14 @@
 <?php
 declare(strict_types=1);
 require dirname(__DIR__,2) . '/src/bootstrap.php';
-use Gyugyu\{Security,Database,Schedules,Participants,Groups,Problem};
+use Gyugyu\{Security,Database,Schedules,Participants,Groups,Summary,Problem};
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store'); header('X-Content-Type-Options: nosniff');
 try {
     Security::authorize(); Security::session();
     $service = new Schedules(Database::connect());
     $route = $_GET['route'] ?? '/instances';
-    if (!is_string($route) || !preg_match('~^/instances(?:/([a-f0-9]{32})(/restore|/candidate-slots/(?:bulk|preview)|/participants(?:/([a-f0-9]{32})(/submission)?)?|/groups(?:/([a-f0-9]{32})(/restore)?)?)?)?$~D',$route,$m)) throw new Problem('見つかりません。',404);
+    if (!is_string($route) || !preg_match('~^/instances(?:/([a-f0-9]{32})(/restore|/summary|/candidate-slots/(?:bulk|preview)|/participants(?:/([a-f0-9]{32})(/submission)?)?|/groups(?:/([a-f0-9]{32})(/restore)?)?)?)?$~D',$route,$m)) throw new Problem('見つかりません。',404);
     $method = $_SERVER['REQUEST_METHOD']; $id = $m[1] ?? null; $operation = $m[2] ?? ''; $restore = $operation === '/restore'; $bulk = $operation === '/candidate-slots/bulk';
     $participantId=$m[3] ?? null; $groupId=($m[5] ?? '') ?: null; $groupRestore=isset($m[6]);
     $data = [];
@@ -26,6 +26,15 @@ try {
     if ($method === 'GET' && $operation === '') {
         $result = $id ? $service->get($id) : $service->listing(($_GET['deleted'] ?? '') === '1');
         header('X-CSRF-Token: '.$_SESSION['csrf']);
+    } elseif ($method==='GET' && $id && $operation==='/summary') {
+        $mode=$_GET['mode'] ?? 'all';$selected=$_GET['group_ids'] ?? [];
+        if (!is_string($mode)||!is_array($selected)) throw new Problem('集計条件が不正です。',422);
+        $db=Database::connect();$db->beginTransaction();
+        try {
+            $row=(new Schedules($db))->get($id);
+            $result=Summary::calculate($row,$mode,$selected)+['version'=>$row['version'],'schema_revision'=>$row['schema_revision'],'answers_revision'=>$row['answers_revision']];
+            $db->commit();
+        } catch (Throwable $e) { $db->rollBack();throw $e; }
     } elseif ($method==='GET' && $id && $operation==='/groups') {
         $row=$service->get($id); $result=['groups'=>(new Groups(Database::connect()))->listing($id,($_GET['archived'] ?? '')==='1'),'version'=>$row['version'],'schema_revision'=>$row['schema_revision'],'answers_revision'=>$row['answers_revision']];
     } elseif ($method==='POST' && $id && $operation==='/groups') { $result=(new Groups(Database::connect()))->change($id,null,'create',$data); http_response_code(201); }
