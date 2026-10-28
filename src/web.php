@@ -6,6 +6,7 @@ require_once __DIR__ . '/group-page.php';
 require_once __DIR__ . '/day-page.php';
 require_once __DIR__ . '/participant-page.php';
 require_once __DIR__ . '/reception-page.php';
+require_once __DIR__ . '/confirmation-page.php';
 use Gyugyu\{Security,Schedules,Database,Problem};
 function h(mixed $s): string { return htmlspecialchars((string)$s, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); }
 function jstTime(string $utc): string { return (new DateTimeImmutable($utc))->setTimezone(new DateTimeZone('Asia/Tokyo'))->format('Y-m-d H:i:s') . ' JST'; }
@@ -30,6 +31,7 @@ function runWeb(): void {
     if (!in_array($method,['GET','POST'],true)) throw new Problem('許可されていないメソッドです。',405);
     $id = $_GET['id'] ?? '';
     if (!is_string($id)) throw new Problem('IDが不正です。',400);
+    if ($page === 'confirmation.php') { confirmationPage($id,$method); return; }
     if ($page === 'reception.php') { receptionPage($id,$method); return; }
     if ($page === 'participants.php') { participantPage($id,$method); return; }
     if ($page === 'days.php') { dayPage($id,$method); return; }
@@ -70,6 +72,7 @@ function runWeb(): void {
         } else {
             if ($row['description'] !== '') echo '<div class="description">'.h($row['description']).'</div>';
             echo '<p>状態: '.h($row['status']).' · 日本時間 · 更新: '.h(jstTime($row['updated_at'])).'</p>';
+            if ($row['status']==='confirmed') confirmationDisplay($row['confirmation']);
             candidateGrid($row);
             echo '<details id="metadata-editor"'.($error?' open':'').'><summary>調整名・説明を編集</summary><form method="post"><fieldset'.($row['status']==='open'?'':' disabled').'><legend>受付中のみ編集できます</legend>';
             // Preserve the submitted version after a conflict; never silently retry a stale edit.

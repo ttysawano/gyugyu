@@ -331,6 +331,34 @@ class HTTPTests(unittest.TestCase):
         self.assertEqual(self.request(route+'/participants/'+person['id']+'/submission','PUT',submit,token=token)[0],409)
         submit['expected_version']=5;self.assertEqual(call('/participants/'+person['id']+'/submission','PUT',submit)['version'],2)
 
+    def test_confirmed_state(self):
+        _,h,_=self.request('api/index.php');token=h['X-CSRF-Token']
+        _,_,body=self.request('api/index.php','POST',{'title':'受付HTTP','dates':['2026-11-03']},token=token);row=json.loads(body);route='api/index.php?route=/instances/'+row['id'];endpoint=route+'/confirmation'
+        def call(path,method,data):
+            code,_,body=self.request(route+path,method,data,token=token);self.assertIn(code,[200,201],body);return json.loads(body)
+        person=call('/participants','POST',{'display_name':'参加','submission_key':'d'*32,'expected_version':1,'expected_schema_revision':1,'answers':[]})
+        group=call('/groups','POST',{'name':'群','expected_version':1,'expected_schema_revision':1})
+        state=json.loads(self.request(route)[2]);req={key:state[field] for key,field in [('expected_version','version'),('expected_schema_revision','schema_revision'),('expected_answers_revision','answers_revision')]};req.update(slot_id=row['days'][0]['slots'][6]['id'],mode='all',group_ids=[],confirmation='受付HTTP',confirm_selection=True)
+        for path in ['confirmation.php?id='+row['id'],'assets/confirmation.mjs']:self.assertEqual(self.request(path,auth=False)[0],401)
+        for t,o in [(None,True),(token,False),(token,'https://evil.example')]:self.assertEqual(self.request(endpoint,'POST',req,token=t,origin=o)[0],403)
+        self.assertEqual(self.request(endpoint,'POST',req,token=token,auth=False)[0],401)
+        self.assertEqual(self.request(endpoint,'POST',dict(req,confirmation='wrong'),token=token)[0],422)
+        self.assertEqual(self.request(endpoint,'POST',dict(req,action='confirmed'),token=token)[0],422)
+        call('/confirmation','POST',req);self.assertEqual(self.request(endpoint,'POST',req,token=token)[0],409)
+        expected={k:v for k,v in req.items() if k.startswith('expected_')};expected['expected_version']=2
+        submit=dict(expected,display_name='参加',answers=[],expected_participant_version=1,submission_key='e'*32)
+        writes=[('', 'PATCH',dict(expected,title='変更')),('/participants','POST',submit),('/participants/'+person['id']+'/submission','PUT',submit),('/participants/'+person['id'],'PATCH',dict(expected,expected_participant_version=1,confirmation='参加',is_active=False)),('/participants/'+person['id']+'/restore','POST',dict(expected,expected_participant_version=1,confirmation='参加')),('/groups','POST',dict(expected,name='新群')),('/groups/'+group['id'],'PATCH',dict(expected,expected_group_version=1,name='群')),('/groups/'+group['id'],'DELETE',dict(expected,expected_group_version=1,confirmation='群')),('/groups/'+group['id']+'/restore','POST',dict(expected,expected_group_version=1)),('/days','POST',dict(expected,action='add',local_date='2026-11-04')),('/days','DELETE',dict(expected,day_id=row['days'][0]['id'])),('/days','POST',dict(expected,action='restore',day_id=row['days'][0]['id'])),('/candidate-slots/preview','POST',dict(expected,masks=[])),('/candidate-slots/bulk','PATCH',dict(expected,masks=[]))]
+        for path,method,data in writes:self.assertEqual(self.request(route+path,method,data,token=token)[0],409,(path,method))
+        for path in [route,route+'/summary',route+'/summary&mode=include&group_ids[]='+group['id'],'event.php?id='+row['id'],'confirmation.php?id='+row['id']]:self.assertEqual(self.request(path)[0],200)
+        for fmt in ['json','wide','long','summary']:
+            code,h,_=self.request(route+'/export&format='+fmt);self.assertEqual(code,200);self.assertIn('no-store',h['Cache-Control'])
+        locked=json.loads(self.request(route)[2]);self.assertEqual(locked['participants'],state['participants']);self.assertEqual(locked['days'],state['days'])
+        call('','DELETE',{'expected_version':2,'confirmation':'受付HTTP'});self.assertEqual(self.request(endpoint,'POST',req,token=token)[0],404)
+        restored=call('/restore','POST',{'expected_version':3});self.assertEqual(restored['status'],'confirmed');self.assertEqual(restored['confirmation'],locked['confirmation'])
+        reopened=call('/confirmation/cancel','POST',dict(expected,expected_version=4,confirmation='受付HTTP',confirm_selection=True));self.assertEqual(reopened['status'],'open')
+        self.assertEqual(self.request(route+'/participants/'+person['id']+'/submission','PUT',submit,token=token)[0],409)
+        submit['expected_version']=5;self.assertEqual(call('/participants/'+person['id']+'/submission','PUT',submit)['version'],2)
+
     def test_participant_restoration(self):
         _,h,_=self.request('api/index.php');token=h['X-CSRF-Token']
         _,_,body=self.request('api/index.php','POST',{'title':'restore','dates':['2026-11-03']},token=token);row=json.loads(body);route='api/index.php?route=/instances/'+row['id']

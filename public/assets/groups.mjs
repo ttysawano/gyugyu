@@ -22,7 +22,7 @@ function initialize(root) {
         }
         root.querySelector('#group-status').textContent=`対象${visible.size}人／全${people.size}人`+(state.mode==='include'&&!state.selected.length?'（グループ未選択）':'')+'。未入力人数は時刻ごとの内訳に表示します。';
         summarize(state.mode,state.selected);
-        for(const id of ['group-manage','date-manage','participant-manage','reception-manage'])root.querySelector('#'+id).setAttribute('aria-disabled',String(busy()));
+        for(const id of ['group-manage','date-manage','participant-manage','reception-manage','confirmation-manage'])root.querySelector('#'+id).setAttribute('aria-disabled',String(busy()));
     }
     view.addEventListener('change',()=>{if(!busy())display=view.value;render();});
     root.addEventListener('candidate-saved',render);
@@ -30,7 +30,8 @@ function initialize(root) {
         if(!busy()){state={mode:mode.value,selected:inputs.filter(input=>input.checked).map(input=>input.value)};try{sessionStorage.setItem(key,JSON.stringify(state));}catch{}}
         render();
     });
-    for(const id of ['group-manage','date-manage','participant-manage','reception-manage'])root.querySelector('#'+id).addEventListener('click',event=>{if(busy()){event.preventDefault();root.querySelector('#group-status').textContent='編集中です。保存または取消後に管理画面を開いてください。';}});
+    for(const id of ['group-manage','date-manage','participant-manage','reception-manage','confirmation-manage'])root.querySelector('#'+id).addEventListener('click',event=>{if(busy()){event.preventDefault();root.querySelector('#group-status').textContent='編集中です。保存または取消後に管理画面を開いてください。';}});
+    root.querySelector('#confirmation-manage').addEventListener('click',event=>{if(busy())return;const url=new URL(event.currentTarget.href);url.searchParams.set('mode',state.mode);url.searchParams.delete('group_ids[]');for(const id of state.selected)url.searchParams.append('group_ids[]',id);event.currentTarget.href=url.href;});
     for(const event of ['answer-mode','candidate-mode','participants-rendered','export-mode']) root.addEventListener(event,render);
     metadata?.addEventListener('toggle',render);render();
 }

@@ -81,6 +81,7 @@ final class Schedules
         $participants=new Participants($this->db);
         $row['participants']=array_map(fn($pid)=>$participants->get($id,$pid),$q->fetchAll(PDO::FETCH_COLUMN));
         $row['groups']=(new Groups($this->db))->listing($id);
+        $row['confirmation']=(new Confirmation($this->db))->current($id);
         return $row;
     }
     private function transaction(callable $work): mixed
