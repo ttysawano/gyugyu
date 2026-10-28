@@ -33,16 +33,16 @@ function initialize(root) {
     }
     function render() {
         $('answer-tools').hidden=!active;
-        $('participant-add').disabled=!!active||!!root.dataset.candidateEditing||!!metadata?.open;
+        $('participant-add').disabled=!!active||!!root.dataset.candidateEditing||!!root.dataset.exporting||!!metadata?.open;
         $('answer-inputs').disabled=saving;
         for(const id of ['answer-save','answer-cancel','answer-reload','participant-hide']) $(id).disabled=saving;
         $('participant-hide').hidden=!active||active.id==='draft';
         $('answer-undo').disabled=saving||!draft?.past.length; $('answer-redo').disabled=saving||!draft?.future.length;
-        if(metadata) metadata.hidden=!!active||!!root.dataset.candidateEditing;
+        if(metadata) metadata.hidden=!!active||!!root.dataset.candidateEditing||!!root.dataset.exporting;
         for(const row of root.querySelectorAll('.participant-row')) {
             const selected=active?.id===row.dataset.participant,day=row.closest('[data-day]').dataset.day;
             row.classList.toggle('answer-editing',selected);
-            row.querySelector('.participant-edit').disabled=!!active||!!root.dataset.candidateEditing||!!metadata?.open||root.dataset.status!=='open';
+            row.querySelector('.participant-edit').disabled=!!active||!!root.dataset.candidateEditing||!!root.dataset.exporting||!!metadata?.open||root.dataset.status!=='open';
             [...row.querySelectorAll('.answer-cell')].forEach((cell,i)=>{
                 const value=selected?draft.value[day][i]:cell.dataset.state;
                 cell.textContent=symbols[value]; cell.dataset.display=value;
@@ -68,7 +68,7 @@ function initialize(root) {
         }
     }
     function begin(id) {
-        if(active||saving||root.dataset.candidateEditing||metadata?.open||root.dataset.status!=='open') return;
+        if(active||saving||root.dataset.exporting||root.dataset.candidateEditing||metadata?.open||root.dataset.status!=='open') return;
         if(id==='draft') newRows();
         const selected=rows(id),first=selected[0];
         active={id,version:Number(first.dataset.version),key:[...crypto.getRandomValues(new Uint8Array(16))].map(n=>n.toString(16).padStart(2,'0')).join('')};
@@ -84,6 +84,7 @@ function initialize(root) {
     $('participant-name').addEventListener('input',()=>$('participant-name').setCustomValidity(''));
     metadata?.addEventListener('toggle',render);
     root.addEventListener('candidate-mode',render);
+    root.addEventListener('export-mode',render);
     root.addEventListener('candidate-saved',event=>{
         revision=event.detail.schema_revision; version=event.detail.version; readSlots(); render();
     });

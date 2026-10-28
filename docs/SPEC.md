@@ -688,3 +688,15 @@ gyugyu/
 - 集計は画面に読み込んだ保存済みデータのスナップショットから行う。回答・所属保存、候補保存、参加者非表示後に同じデータから再計算する。編集中の下書きは含まない旨を明示し、表示モードとマスクの変更は編集モード中無効とする。編集中の新規行は表示するが保存まで集計対象にしない。自動ポーリングは追加せず、他端末の最新状態は再読み込みで確認する。
 - GET `/instances/{id}/summary` は`mode`と`group_ids[]`を受け、同案件の有効グループ以外を422とする。PHPとJSで同じ計算を行い、対象ID・スロット別人数／内訳／score／暫定フラグ・順位スロットID配列を返す。案件／schema／answers版数を併記する。案件読取りは単一SQLite読取りtransactionで整合させ、no-storeとする。フィルター・表示モード・集計GETはDBを書き換えない。
 - CSV/JSON export、日付追加削除、参加者復帰、受付終了・確定などのライフサイクルUI/APIは後続。集計の読取りJSON APIはexport機能の完成を意味しない。
+
+
+## 23. 第6実装段階：CSV／完全論理JSONエクスポート
+
+第12節の4形式を実装する。列名・文字コード・schemaの具体化は本節とREADMEに記録する。import、監査ログ出力、日付／参加者復帰／受付状態のライフサイクルUIは今回追加しない。
+
+- GET `/instances/{id}/export`。`format=json|wide|long|summary`、CSVの`scope=all|mask`と`mode=all|include|exclude`、`group_ids[]`を受ける。通常CSVは有効参加者・有効日・有効候補のみ。全員scopeでも別案件・archived group IDを検証し拒否する。slot/day/participant指定など未対応queryも422とし、暗黙に無視しない。完全JSONはscope=allかつマスクなしに限定する。
+- 生成は単一SQLite読取りSAVEPOINTのスナップショットから行い、DBを変更しない。CSVの対象と数値は既存Summary計算を再利用する。生成日時UTC、案件/schema/answers版数、scope・mask条件をCSVの各データ行、JSONのメタデータに記載する。出力は現在の保存済みデータで、画面の古いスナップショットと異なる可能性を明示する。
+- 完全JSONのformat_versionは1。案件名・改行を含む説明・timezone・状態・版数、全日と全48slots、候補フラグ、inactive参加者、archived日／群・所属、候補外回答を保持する。is_active/is_candidateはboolean、版数・ordinal等は整数、nullはnull。unknownは回答レコードなし。UTCの開始終了に加えJSTのISO8601値を併記する。パスワード／セッション／秘密設定／submission_key／name_keyは含めず、JSON元文字列へCSV用防御を適用しない。
+- CSVはUTF-8 BOM付き・CRLF行区切り、カンマ／引用符／改行はfputcsvの引用処理（独自escape文字なし）を使う。全文字列セルの先頭が数式記号`= + - @`（全角含む）やUnicode空白・制御文字ならアポストロフィを追加する。整数scoreの負数は変更しない。ワイドは○△×/空欄、ロングはyes/maybe/no/unknown。集計のN=0ではY/T/X/U/scoreを「—」にし、provisional/all_yesは0とする。データ行がない場合はヘッダーのみ。
+- CSVの正確な列構成はREADMEのエクスポート節に記載する。所属と選択群はIDを含むJSON配列として1セルに格納し、同名参加者も不変IDで区別する。JST時刻は+09:00、UTCはZ。完全JSONはUTF-8 BOMなし。
+- ファイル名は検証済みhex案件ID・UTC日時・scope・formatのみ。Content-Dispositionはattachment、Content-Typeはtext/csvまたはapplication/json、no-store/nosniff。共通認証/TLS前提を維持し、locked/confirmedは出力可、deletedは404。JavaScriptのBlobダウンロードで結果を保存し、出力失敗は明示する。回答・候補・メタデータ編集中は出力不可、生成中は編集開始と表示条件変更を止め、下書きを送らない。

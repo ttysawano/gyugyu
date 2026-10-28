@@ -266,6 +266,43 @@ class HTTPTests(unittest.TestCase):
         self.assertEqual(self.request(endpoint+'&mode=include&group_ids[]='+group)[0],422)
         self.assertEqual(json.loads(self.request(endpoint+'&mode=include')[2])['N'],2)
 
+    def test_exports(self):
+        import csv,io,sqlite3
+        _,h,_=self.request('api/index.php');token=h['X-CSRF-Token']
+        _,_,body=self.request('api/index.php','POST',{'title':'=export','description':'\t@evil,"quoted"\n日本語','dates':['2026-11-02']},token=token);row=json.loads(body);route='api/index.php?route=/instances/'+row['id'];endpoint=route+'/export'
+        _,_,body=self.request(route+'/groups','POST',{'expected_version':1,'expected_schema_revision':1,'name':'=group'},token=token);group=json.loads(body)['id']
+        for i in range(2):
+            payload={'expected_version':1,'expected_schema_revision':2,'display_name':'=name','submission_key':str(i)*32,'group_ids':[group] if i==0 else [],'answers':[{'slot_id':row['days'][0]['slots'][6]['id'],'state':'no'}] if i==0 else []}
+            self.assertEqual(self.request(route+'/participants','POST',payload,token=token)[0],201)
+        with sqlite3.connect(self.env['GYUGYU_DB']) as db: before='\n'.join(db.iterdump())
+        self.assertEqual(self.request(endpoint,auth=False)[0],401);self.assertEqual(self.request('assets/exports.mjs',auth=False)[0],401)
+        code,headers,body=self.request(endpoint);self.assertEqual(code,200);self.assertIn('application/json',headers['Content-Type']);self.assertIn('no-store',headers['Cache-Control'])
+        self.assertRegex(headers['Content-Disposition'],r'^attachment; filename="gyugyu-[a-f0-9]{32}-[0-9TZ]+-all-json\.json"$');self.assertNotIn('export',headers['Content-Disposition'])
+        full=json.loads(body);self.assertEqual(full['instance']['description'],row['description']);self.assertEqual(full['instance']['title'],'=export');self.assertIsInstance(full['instance']['version'],int);self.assertIs(full['days'][0]['slots'][0]['is_candidate'],False);self.assertNotIn('submission_key',body)
+        for format in ['wide','long','summary']:
+            code,headers,body=self.request(endpoint+'&format='+format+'&scope=mask&mode=include&group_ids[]='+group);self.assertEqual(code,200);self.assertIn('text/csv',headers['Content-Type']);self.assertTrue(body.startswith('\ufeff'))
+            rows=list(csv.DictReader(io.StringIO(body.lstrip('\ufeff'))));self.assertEqual(rows[0]['title'],"'=export");self.assertEqual(rows[0]['description'],"'"+row['description'])
+            if format=='wide':self.assertEqual(len(rows),1);self.assertEqual(rows[0]['name'],"'=name");self.assertEqual(json.loads(rows[0]['groups'])[0]['name'],'=group')
+            if format=='long':self.assertEqual(len(rows),18);self.assertEqual(rows[0]['state'],'no');self.assertEqual(rows[0]['slot_start_utc'],'2026-11-02T00:00:00Z');self.assertEqual(rows[0]['slot_start_jst'],'2026-11-02T09:00:00+09:00')
+            if format=='summary':self.assertEqual(rows[0]['N'],'1');self.assertEqual(rows[0]['X'],'1');self.assertEqual(rows[0]['score'],'-2')
+        for query in ['&format=json&scope=mask','&format=wide&group_ids[]=foreign','&format=wide&slot_ids[]=foreign','&format[]=json','&filename=evil%0D%0AX-Evil:yes']:
+            code,headers,_=self.request(endpoint+query);self.assertEqual(code,422);self.assertNotIn('Content-Disposition',headers);self.assertNotIn('X-Evil',headers)
+        self.assertEqual(self.request(endpoint,'POST',{},token=token)[0],405);self.assertEqual(self.request(endpoint,'POST',{},token=token,origin='https://evil.example')[0],403)
+        with sqlite3.connect(self.env['GYUGYU_DB']) as db:self.assertEqual('\n'.join(db.iterdump()),before)
+        # Another connection atomically changes two tables while CLI exports repeatedly read them.
+        with sqlite3.connect(self.env['GYUGYU_DB']) as db:
+            db.execute("UPDATE instances SET title='v0' WHERE id=?",(row['id'],));db.execute("UPDATE participants SET display_name='v0' WHERE instance_id=?",(row['id'],))
+        script="require "+json.dumps(str(ROOT/'src/bootstrap.php'))+"; $e=new Gyugyu\\Export(Gyugyu\\Database::connect()); echo \"ready\\n\";flush();$seen=[];for($i=0;$i<80;$i++){ $x=json_decode($e->generate($argv[1],[])['content'],true);$seen[$x['instance']['title']]=true;foreach($x['participants'] as $p)if($p['display_name']!==$x['instance']['title'])exit(2);usleep(2000); } echo 'snapshot-ok:'.count($seen);"
+        proc=subprocess.Popen([PHP,'-r',script,row['id']],env=self.env,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+        self.assertEqual(proc.stdout.readline(),b'ready\n')
+        with sqlite3.connect(self.env['GYUGYU_DB']) as db:
+            for i in range(1,60):
+                with db:db.execute('UPDATE instances SET title=? WHERE id=?',('v'+str(i),row['id']));db.execute('UPDATE participants SET display_name=? WHERE instance_id=?',('v'+str(i),row['id']))
+                time.sleep(.003)
+        out,err=proc.communicate(timeout=15);self.assertEqual(proc.returncode,0,err.decode());self.assertTrue(out.startswith(b'snapshot-ok:'));self.assertGreater(int(out.split(b':')[1]),1)
+        self.assertEqual(self.request(route,'DELETE',{'expected_version':1,'confirmation':'v59'},token=token)[0],200)
+        self.assertEqual(self.request(endpoint)[0],404)
+
     def test_backup_restore(self):
         fixture = "require " + json.dumps(str(ROOT/'src/bootstrap.php')) + "; $s=new Gyugyu\\Schedules(Gyugyu\\Database::connect()); $r=$s->create(['title'=>'backup fixture','dates'=>['2026-11-05']]);  $p=new Gyugyu\\Participants(Gyugyu\\Database::connect()); $p->submit($r['id'],null,['display_name'=>'backup participant','expected_version'=>1,'expected_schema_revision'=>1,'submission_key'=>str_repeat('a',32),'answers'=>[['slot_id'=>$r['days'][0]['slots'][6]['id'],'state'=>'yes']]]); echo $r['id'];"
         ident=subprocess.check_output([PHP,'-r',fixture],env=self.env).decode()
