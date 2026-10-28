@@ -6,7 +6,7 @@ from playwright.sync_api import sync_playwright,expect
 HTTPTests.setUpClass()
 try:
  api=HTTPTests();_,h,_=api.request('api/index.php');token=h['X-CSRF-Token']
- _,_,body=api.request('api/index.php','POST',{'title':'確定UI','dates':['2026-11-03']},token=token);row=json.loads(body);route='api/index.php?route=/instances/'+row['id'];slot=row['days'][0]['slots'][6]['id']
+ _,_,body=api.request('api/index.php','POST',{'title':'確定UI','dates':['2026-11-03'],'initial_window':{'start':'09:00','end':'06:00','end_next_day':True}},token=token);row=json.loads(body);route='api/index.php?route=/instances/'+row['id'];slot=row['days'][0]['slots'][6]['id']
  def saved():return json.loads(api.request(route)[2])
  def call(path,method,data):
   code,_,body=api.request(route+path,method,data,token=token);assert code in [200,201],(code,body);return json.loads(body)
@@ -35,6 +35,16 @@ try:
   def approve():page.locator('[name=confirmation]').fill('確定UI');page.locator('[name=confirm_selection]').check()
   page.locator('[name=slot_id]').select_option(slot);page.locator('[type=reset]').click();expect(page.locator('[name=slot_id]')).to_have_value('')
   preview()
+  # Each selection dimension must invalidate a successful, already-approved preview.
+  for selector,new,original in [('[name=slot_id]',row['days'][0]['slots'][7]['id'],slot),('[name=mode]','exclude','include'),('[name=group_ids]',False,True)]:
+   approve()
+   if isinstance(new,bool):page.locator(selector).set_checked(new)
+   else:page.locator(selector).select_option(new)
+   expect(page.locator('#decision-save')).to_be_disabled();expect(page.locator('[name=confirm_selection]')).not_to_be_checked();expect(page.locator('#decision-preview-result')).to_contain_text('再プレビュー')
+   if isinstance(original,bool):page.locator(selector).set_checked(original)
+   else:page.locator(selector).select_option(original)
+   expect(page.locator('#decision-save')).to_be_disabled();assert saved()['confirmation'] is None
+   page.locator('#decision-preview').click();expect(page.locator('#decision-preview-result')).to_contain_text('対象2人');expect(page.locator('#decision-save')).to_be_enabled()
   for person in people:expect(page.locator('#decision-preview-result')).to_contain_text('#'+person['id'][:6])
   approve();page.locator('[type=reset]').click();expect(page.locator('[name=slot_id]')).to_have_value('');assert saved()['confirmation'] is None
   preview();approve();call('/participants/'+people[0]['id']+'/submission','PUT',dict(rev(),expected_participant_version=1,display_name='同名',answers=[]));page.locator('#decision-save').click();expect(page.locator('#confirmation-status')).to_contain_text('競合');expect(page.locator('[name=slot_id]')).to_have_value(slot)
@@ -49,10 +59,11 @@ try:
   exported=json.loads(Path(download.value.path()).read_text());assert exported['instance']['confirmation']==decision
   page.locator('#confirmation-manage').click();expect(page.locator('#decision-save')).to_have_text('確定を取り消す');approve();page.route('**/api/index.php?route=**/confirmation/cancel',loss);page.locator('#decision-save').click();expect(page.locator('#confirmation-status')).to_contain_text('通信に失敗');assert saved()['status']=='open' and saved()['confirmation'] is None;page.unroute('**/api/index.php?route=**/confirmation/cancel');page.locator('#decision-save').click();expect(page.locator('#confirmation-status')).to_contain_text('競合')
   # Mobile confirms an explicitly empty target set; keyboard triggers preview.
-  mobile=browser.new_context(extra_http_headers={'Authorization':HTTPTests.auth},viewport={'width':390,'height':844},is_mobile=True,has_touch=True);mp=mobile.new_page();mp.on('pageerror',lambda e:errors.append(str(e)));mp.on('dialog',lambda d:d.accept());mp.goto(HTTPTests.origin+'/gyugyu/confirmation.php?id='+row['id']);mp.locator('[name=slot_id]').select_option(slot);mp.locator('[name=mode]').select_option('include');mp.locator('#decision-preview').focus();mp.keyboard.press('Enter');expect(mp.locator('#decision-preview-result')).to_contain_text('対象0人');mp.locator('[name=confirmation]').fill('確定UI');mp.locator('[name=confirm_selection]').check();mp.locator('#decision-save').tap();expect(mp.locator('#decision-save')).to_have_text('確定を取り消す');assert saved()['confirmation']['mask']['N']==0
+  mobile=browser.new_context(extra_http_headers={'Authorization':HTTPTests.auth},viewport={'width':390,'height':844},is_mobile=True,has_touch=True);mp=mobile.new_page();mp.on('pageerror',lambda e:errors.append(str(e)));mp.on('dialog',lambda d:d.accept());mp.goto(HTTPTests.origin+'/gyugyu/confirmation.php?id='+row['id']);mp.locator('[name=slot_id]').select_option(row['days'][0]['slots'][36]['id']);mp.locator('[name=mode]').select_option('include');mp.locator('#decision-preview').focus();mp.keyboard.press('Enter');expect(mp.locator('#decision-preview-result')).to_contain_text('対象0人');mp.locator('[name=confirmation]').fill('確定UI');mp.locator('[name=confirm_selection]').check();mp.locator('#decision-save').tap();expect(mp.locator('#decision-save')).to_have_text('確定を取り消す');assert saved()['confirmation']['mask']['N']==0
+  midnight=saved()['confirmation'];assert midnight['slot_id']==row['days'][0]['slots'][36]['id'];assert midnight['starts_at_utc']=='2026-11-03T15:00:00Z' and midnight['ends_at_utc']=='2026-11-03T15:30:00Z';expect(mp.locator('.confirmation-record')).to_contain_text('2026-11-04 00:00:00 JST')
   mp.locator('[name=confirmation]').fill('確定UI');mp.locator('[name=confirm_selection]').check();mp.locator('#decision-save').tap();expect(mp.locator('[name=slot_id]')).to_have_value('');assert saved()['status']=='open';assert mp.evaluate('document.documentElement.scrollWidth<=innerWidth')
   req=dict(rev(),action='archive',day_id=row['days'][0]['id']);plan=call('/days/preview','POST',req);call('/days','DELETE',dict(req,confirmed_operation='archive',confirmation='2026-11-03',expected_answer_count=plan['answer_count'],expected_visible_answers=plan['visible_answers']))
   mp.reload();expect(mp.locator('[name=slot_id] option')).to_have_count(1);mp.locator('#decision-preview').tap();expect(mp.locator('#confirmation-status')).to_contain_text('有効候補');expect(mp.locator('#decision-save')).to_be_disabled();assert saved()['confirmation'] is None
   assert not errors,errors;browser.close()
- print('PASS: Chromium explicit slot/mask, same-name IDs, preview invalidation, cancel, draft/export guards, stale answers/schema, lost confirm/cancel, frozen display/export, keyboard and zero-target/zero-day mobile')
+ print('PASS: Chromium explicit slot/mask, same-name IDs, slot/mode/group preview invalidation, next-day JST/UTC, cancel, draft/export guards, stale answers/schema, lost confirm/cancel, frozen display/export, keyboard and zero-target/zero-day mobile')
 finally:HTTPTests.tearDownClass()

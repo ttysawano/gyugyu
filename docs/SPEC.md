@@ -759,7 +759,7 @@ gyugyu/
 
 第9.1節のopen/locked→confirmed、confirmed→openを実装する。確定はMVPの1候補枠（30分）のみ。連続区間・通知・importは追加しない。
 
-- 詳細の「日時確定・確定取消」から専用画面を開く。現在の表示マスクMを初期値として明示し、候補枠は未選択から始める。利用者が枠とall/include/exclude・群を選び、サーバープレビューのJST日時・対象条件・対象人数・○△×/未入力・短縮ID付き氏名を確認する。案件名の再入力と確認チェックで確定する。順位から自動選択せず、N>0・全員○等の追加適格条件は課さない。有効枠がなければ確定できない。
+- 詳細の「日時確定・確定取消」から専用画面を開く。通常クリックでは現在の表示マスクMを初期値として明示し、候補枠は未選択から始める。中クリック／コンテキストメニューで別タブに開く場合のマスク引継ぎは保証せず、既定の全員で開くことがあるため、画面の対象条件を再確認する。利用者が枠とall/include/exclude・群を選び、サーバープレビューのJST日時・対象条件・対象人数・○△×/未入力・短縮ID付き氏名を確認する。案件名の再入力と確認チェックで確定する。順位から自動選択せず、N>0・全員○等の追加適格条件は課さない。有効枠がなければ確定できない。
 - POST `/instances/{id}/confirmation/preview` とPOST `/confirmation` は `slot_id`、`mode`、`group_ids`、整数の `expected_version`／`expected_schema_revision`／`expected_answers_revision` を受ける。確定には `confirmation`（案件名）と `confirm_selection:true` が必要。同案件の有効日・有効候補だけを許し、他案件／無効枠／群を拒否する。対象参加者ID配列などの未対応入力は拒否し、解決済み集合をクライアントから信頼しない。
 - 同一書込みtransactionで既存SummaryによりMを解決し、OR重複排除、include空=0人、exclude空=全員、0群=全員を維持する。選択群ID・mode、群ID/名前、解決した参加者ID/名前/有効所属ID/枠の回答、N/人数/score/暫定フラグ、決定元の3版数をマスクsnapshotとして保存する。allの選択群は空に正規化する。
 - migration `004_confirmation.sql` の `instance_confirmations` は案件ごとの現在の確定1件を保持する。slot ID、UTC開始・終了、confirmed_at（決定日時UTC）、mask JSONを保存。FKとtriggerで別案件/別時刻を拒否し、レコード更新は禁止する。status=confirmed、instances.version増分、updated_at、shared-basic監査と原子的に保存する。schema/answers版数、回答・所属・日時スロットは変更しない。
