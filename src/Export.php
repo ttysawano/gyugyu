@@ -39,7 +39,7 @@ final class Export
     }
     private function complete(array $row,string $generated): string
     {
-        $instance=array_intersect_key($row,array_flip(['id','title','description','timezone','status','version','schema_revision','answers_revision','created_at','updated_at','deleted_at','status_before_delete']));
+        $instance=array_intersect_key($row,array_flip(['id','title','description','timezone','status','version','schema_revision','answers_revision','created_at','updated_at','deleted_at','status_before_delete','confirmation']));
         $q=$this->db->prepare('SELECT id,instance_id,local_date,sort_index,archived_at FROM instance_days WHERE instance_id=? ORDER BY sort_index,id');$q->execute([$row['id']]);$days=$q->fetchAll();
         $q=$this->db->prepare('SELECT id,day_id,ordinal,starts_at_utc,ends_at_utc,is_candidate FROM day_slots WHERE day_id=? ORDER BY ordinal');
         foreach ($days as &$day) {
@@ -62,8 +62,8 @@ final class Export
         try {
             fwrite($stream,"\xEF\xBB\xBF");
             $write=fn(array $values)=>fputcsv($stream,array_map(fn($value)=>is_string($value)?self::csvText($value):($value===null?'':(is_bool($value)?(int)$value:$value)),$values),',','"','',"\r\n");
-            $header=['instance_id','title','description','timezone','status','version','schema_revision','answers_revision','generated_at','scope','mask_mode','selected_group_ids'];
-            $base=[$row['id'],$row['title'],$row['description'],$row['timezone'],$row['status'],$row['version'],$row['schema_revision'],$row['answers_revision'],$generated,$scope,$mode,json_encode($selected,JSON_THROW_ON_ERROR)];
+            $header=['instance_id','title','description','timezone','status','version','schema_revision','answers_revision','generated_at','scope','mask_mode','selected_group_ids','confirmed_slot_id','confirmed_start_utc','confirmed_end_utc','confirmed_at','confirmed_mask_json'];
+            $base=[$row['id'],$row['title'],$row['description'],$row['timezone'],$row['status'],$row['version'],$row['schema_revision'],$row['answers_revision'],$generated,$scope,$mode,json_encode($selected,JSON_THROW_ON_ERROR),$row['confirmation']['slot_id'] ?? null,$row['confirmation']['starts_at_utc'] ?? null,$row['confirmation']['ends_at_utc'] ?? null,$row['confirmation']['confirmed_at'] ?? null,$row['confirmation']?json_encode($row['confirmation']['mask'],JSON_THROW_ON_ERROR|JSON_UNESCAPED_UNICODE):null];
             $timeHeader=['slot_id','day_id','slot_start_utc','slot_end_utc','slot_start_jst','slot_end_jst'];
             $times=fn($slot)=>[$slot['id'],$slot['day_id'],$slot['starts_at_utc'],$slot['ends_at_utc'],self::jst($slot['starts_at_utc']),self::jst($slot['ends_at_utc'])];
             if ($format==='summary') {

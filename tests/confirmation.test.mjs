@@ -1,0 +1,2 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {decisionSelection} from '../public/assets/confirmation.mjs';
+test('confirmation keeps selected slot/mask and original revisions, without client resolved participants',()=>{const groups=['g'],snap={expected_version:1,expected_schema_revision:2,expected_answers_revision:3};const payload=decisionSelection(snap,'slot','include',groups);groups.push('changed');assert.deepEqual(payload,{...snap,slot_id:'slot',mode:'include',group_ids:['g']});assert.equal('participant_ids' in payload,false);});

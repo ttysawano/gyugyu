@@ -8,7 +8,7 @@ try {
     Security::authorize(); Security::session();
     $service = new Schedules(Database::connect());
     $route = $_GET['route'] ?? '/instances';
-    if (!is_string($route) || !preg_match('~^/instances(?:/([a-f0-9]{32})(/restore|/reception|/summary|/export|/days(?:/preview)?|/candidate-slots/(?:bulk|preview)|/participants(?:/inactive|/([a-f0-9]{32})(/submission|/restore)?)?|/groups(?:/([a-f0-9]{32})(/restore)?)?)?)?$~D',$route,$m)) throw new Problem('見つかりません。',404);
+    if (!is_string($route) || !preg_match('~^/instances(?:/([a-f0-9]{32})(/restore|/confirmation(?:/preview|/cancel)?|/reception|/summary|/export|/days(?:/preview)?|/candidate-slots/(?:bulk|preview)|/participants(?:/inactive|/([a-f0-9]{32})(/submission|/restore)?)?|/groups(?:/([a-f0-9]{32})(/restore)?)?)?)?$~D',$route,$m)) throw new Problem('見つかりません。',404);
     $method = $_SERVER['REQUEST_METHOD']; $id = $m[1] ?? null; $operation = $m[2] ?? ''; $restore = $operation === '/restore'; $bulk = $operation === '/candidate-slots/bulk';
     $participantId=$m[3] ?? null; $groupId=($m[5] ?? '') ?: null; $groupRestore=isset($m[6]);
     $data = [];
@@ -26,7 +26,8 @@ try {
     if ($method === 'GET' && $operation === '') {
         $result = $id ? $service->get($id) : $service->listing(($_GET['deleted'] ?? '') === '1');
         header('X-CSRF-Token: '.$_SESSION['csrf']);
-    } elseif ($method==='POST' && $id && $operation==='/reception') $result=$service->reception($id,$data);
+    } elseif ($method==='POST' && $id && in_array($operation,['/confirmation','/confirmation/preview','/confirmation/cancel'],true)) $result=(new Gyugyu\Confirmation(Database::connect()))->change($id,$operation==='/confirmation/cancel'?'cancel':'confirm',$data,$operation==='/confirmation/preview');
+    elseif ($method==='POST' && $id && $operation==='/reception') $result=$service->reception($id,$data);
     elseif ($method==='GET' && $id && $operation==='/participants/inactive') $result=(new Participants(Database::connect()))->inactive($id);
     elseif ($method==='POST' && $id && $participantId && ($m[4] ?? '')==='/restore') $result=(new Participants(Database::connect()))->restore($id,$participantId,$data);
     elseif ($method==='GET' && $id && $operation==='/days') $result=(new Days(Database::connect()))->listing($id);

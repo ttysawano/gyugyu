@@ -31,7 +31,7 @@ function csvRows(string $content): array {
 $wide=csvRows($export->generate($id,['format'=>'wide'])['content']);
 check(count($wide)===2,'wide active participants only');$wideRow=array_combine($wide[0],$wide[1]);
 check($wideRow['title']==="'=SUM(1)" && $wideRow['name']==="'=HYPERLINK(\"x\")" && $wideRow['description']==="'".$row['description'],'CSV fields protected after parsing quotes/newlines');
-check(count($wide[0])===15+17 && $wide[1][15]==='○' && $wide[1][16]==='','wide candidate-only symbols, unknown blank');
+$firstSlot=array_search('groups',$wide[0],true)+1;check(count($wide[0])===$firstSlot+17 && $wide[1][$firstSlot]==='○' && $wide[1][$firstSlot+1]==='','wide candidate-only symbols, unknown blank');
 $long=csvRows($export->generate($id,['format'=>'long','scope'=>'mask','mode'=>'include','group_ids'=>[$a['id']]])['content']);
 check(count($long)===18,'long current active candidates');$longRow=array_combine($long[0],$long[1]);check($longRow['slot_id']===$slot && $longRow['state']==='yes' && $longRow['scope']==='mask','long typed states and scope');
 $none=csvRows($export->generate($id,['format'=>'wide','scope'=>'mask','mode'=>'include'])['content']);check(count($none)===1,'include empty produces header-only participants');
